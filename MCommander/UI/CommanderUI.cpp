@@ -1392,8 +1392,9 @@ void CommanderUI::renderFilePane(PaneState &pane, float width, float height) {
       ImGui::EndTable();
       // Clicking empty space below rows inside the table clears selection
       ImGuiIO &io = ImGui::GetIO();
-      if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-          !io.KeyAlt && !io.KeySuper && !io.KeyShift) {
+      if (ImGui::IsItemHovered() &&
+          ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !io.KeyAlt &&
+          !io.KeySuper && !io.KeyShift) {
         tab.deselectAll();
       }
     }

@@ -31,6 +31,22 @@ std::vector<std::string> localeSearchDirectories() {
     return dirs;
 }
 
+std::string bundleResourceFile(const std::string& filename) {
+    NSString* resPath = [[NSBundle mainBundle] resourcePath];
+    if (!resPath) return "";
+    NSString* nsFile = [NSString stringWithUTF8String:filename.c_str()];
+    if (!nsFile) return "";
+    NSString* direct = [resPath stringByAppendingPathComponent:nsFile];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:direct]) {
+        return std::string([direct UTF8String]);
+    }
+    NSString* inFonts = [[resPath stringByAppendingPathComponent:@"Fonts"] stringByAppendingPathComponent:nsFile];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:inFonts]) {
+        return std::string([inFonts UTF8String]);
+    }
+    return "";
+}
+
 bool isPackagePath(const std::string& path) {
     NSURL* url = urlFromPath(path);
     if (!url) return false;

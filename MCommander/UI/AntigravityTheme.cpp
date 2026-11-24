@@ -1,4 +1,5 @@
 #include "AntigravityTheme.hpp"
+#include "../Platform/MacBridge.hpp"
 
 #include <filesystem>
 
@@ -98,18 +99,46 @@ ThemeFonts applyAntigravityTheme(float /*dpiScale*/) {
     };
 
     ThemeFonts fonts;
-    const char* sfuiPath = "/System/Library/Fonts/SFNS.ttf";
+    std::string jbRegular = mc::platform::bundleResourceFile("JetBrainsMono-Regular.ttf");
+    std::string jbSemiBold = mc::platform::bundleResourceFile("JetBrainsMono-SemiBold.ttf");
     const char* sfmonoPath = "/System/Library/Fonts/SFNSMono.ttf";
     const char* menloPath = "/System/Library/Fonts/Menlo.ttc";
 
-    if (std::filesystem::exists(sfuiPath)) {
-        fonts.ui = io.Fonts->AddFontFromFileTTF(sfuiPath, 16.0f, nullptr, glyphRanges);
-        fonts.uiBold = io.Fonts->AddFontFromFileTTF(sfuiPath, 16.5f, nullptr, glyphRanges);
-    }
-    if (std::filesystem::exists(sfmonoPath)) {
-        fonts.mono = io.Fonts->AddFontFromFileTTF(sfmonoPath, 15.0f, nullptr, glyphRanges);
-    } else if (std::filesystem::exists(menloPath)) {
-        fonts.mono = io.Fonts->AddFontFromFileTTF(menloPath, 15.0f, nullptr, glyphRanges);
+    static const ImWchar symbolRanges[] = {
+        0x2190, 0x21FF, // Arrows
+        0x2300, 0x23FF, // macOS Cmd/Opt/Shift/Return/Eject symbols
+        0x2500, 0x25FF, // Box drawing & geometric shapes
+        0x2600, 0x26FF, // Stars & misc symbols
+        0x2700, 0x27BF, // Dingbats
+        0,
+    };
+
+    const char* mainFontPath = !jbRegular.empty()
+        ? jbRegular.c_str()
+        : (std::filesystem::exists(sfmonoPath) ? sfmonoPath : menloPath);
+    const char* boldFontPath = !jbSemiBold.empty() ? jbSemiBold.c_str() : mainFontPath;
+
+    if (std::filesystem::exists(mainFontPath)) {
+        fonts.ui = io.Fonts->AddFontFromFileTTF(mainFontPath, 15.0f, nullptr, glyphRanges);
+        if (std::filesystem::exists(sfmonoPath) && mainFontPath != std::string(sfmonoPath)) {
+            ImFontConfig mergeCfg;
+            mergeCfg.MergeMode = true;
+            io.Fonts->AddFontFromFileTTF(sfmonoPath, 15.0f, &mergeCfg, symbolRanges);
+        }
+
+        fonts.uiBold = io.Fonts->AddFontFromFileTTF(boldFontPath, 15.5f, nullptr, glyphRanges);
+        if (std::filesystem::exists(sfmonoPath) && boldFontPath != std::string(sfmonoPath)) {
+            ImFontConfig mergeCfg;
+            mergeCfg.MergeMode = true;
+            io.Fonts->AddFontFromFileTTF(sfmonoPath, 15.5f, &mergeCfg, symbolRanges);
+        }
+
+        fonts.mono = io.Fonts->AddFontFromFileTTF(mainFontPath, 14.5f, nullptr, glyphRanges);
+        if (std::filesystem::exists(sfmonoPath) && mainFontPath != std::string(sfmonoPath)) {
+            ImFontConfig mergeCfg;
+            mergeCfg.MergeMode = true;
+            io.Fonts->AddFontFromFileTTF(sfmonoPath, 14.5f, &mergeCfg, symbolRanges);
+        }
     }
 
     if (!fonts.ui) fonts.ui = io.Fonts->AddFontDefault();
