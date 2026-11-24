@@ -1,0 +1,14 @@
+# macOS / Xcode
+.DS_Store
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+.clangd/
+.cache/
+
+# Agent / local
+.agents/
+.gemini/

@@ -1,0 +1,47 @@
+[
+  {
+    "directory": "/Users/tomasz/Documents/MCommander",
+    "command": "/usr/bin/clang++ -std=gnu++20 -I/Users/tomasz/Documents/MCommander/MCommander -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/backends -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/misc/cpp -c /Users/tomasz/Documents/MCommander/MCommander/Core/Models.cpp",
+    "file": "/Users/tomasz/Documents/MCommander/MCommander/Core/Models.cpp"
+  },
+  {
+    "directory": "/Users/tomasz/Documents/MCommander",
+    "command": "/usr/bin/clang++ -std=gnu++20 -I/Users/tomasz/Documents/MCommander/MCommander -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/backends -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/misc/cpp -c /Users/tomasz/Documents/MCommander/MCommander/Core/FileSystemService.cpp",
+    "file": "/Users/tomasz/Documents/MCommander/MCommander/Core/FileSystemService.cpp"
+  },
+  {
+    "directory": "/Users/tomasz/Documents/MCommander",
+    "command": "/usr/bin/clang++ -std=gnu++20 -I/Users/tomasz/Documents/MCommander/MCommander -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/backends -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/misc/cpp -c /Users/tomasz/Documents/MCommander/MCommander/Core/ToolsService.cpp",
+    "file": "/Users/tomasz/Documents/MCommander/MCommander/Core/ToolsService.cpp"
+  },
+  {
+    "directory": "/Users/tomasz/Documents/MCommander",
+    "command": "/usr/bin/clang++ -std=gnu++20 -I/Users/tomasz/Documents/MCommander/MCommander -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/backends -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/misc/cpp -c /Users/tomasz/Documents/MCommander/MCommander/Core/PaneState.cpp",
+    "file": "/Users/tomasz/Documents/MCommander/MCommander/Core/PaneState.cpp"
+  },
+  {
+    "directory": "/Users/tomasz/Documents/MCommander",
+    "command": "/usr/bin/clang++ -std=gnu++20 -I/Users/tomasz/Documents/MCommander/MCommander -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/backends -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/misc/cpp -c /Users/tomasz/Documents/MCommander/MCommander/Core/CommanderEngine.cpp",
+    "file": "/Users/tomasz/Documents/MCommander/MCommander/Core/CommanderEngine.cpp"
+  },
+  {
+    "directory": "/Users/tomasz/Documents/MCommander",
+    "command": "/usr/bin/clang++ -std=gnu++20 -I/Users/tomasz/Documents/MCommander/MCommander -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/backends -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/misc/cpp -c /Users/tomasz/Documents/MCommander/MCommander/UI/AntigravityTheme.cpp",
+    "file": "/Users/tomasz/Documents/MCommander/MCommander/UI/AntigravityTheme.cpp"
+  },
+  {
+    "directory": "/Users/tomasz/Documents/MCommander",
+    "command": "/usr/bin/clang++ -std=gnu++20 -I/Users/tomasz/Documents/MCommander/MCommander -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/backends -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/misc/cpp -c /Users/tomasz/Documents/MCommander/MCommander/UI/CommanderUI.cpp",
+    "file": "/Users/tomasz/Documents/MCommander/MCommander/UI/CommanderUI.cpp"
+  },
+  {
+    "directory": "/Users/tomasz/Documents/MCommander",
+    "command": "/usr/bin/clang++ -ObjC++ -fobjc-arc -std=gnu++20 -I/Users/tomasz/Documents/MCommander/MCommander -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/backends -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/misc/cpp -c /Users/tomasz/Documents/MCommander/MCommander/Platform/MacBridge.mm",
+    "file": "/Users/tomasz/Documents/MCommander/MCommander/Platform/MacBridge.mm"
+  },
+  {
+    "directory": "/Users/tomasz/Documents/MCommander",
+    "command": "/usr/bin/clang++ -ObjC++ -fobjc-arc -std=gnu++20 -I/Users/tomasz/Documents/MCommander/MCommander -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/backends -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/misc/cpp -c /Users/tomasz/Documents/MCommander/MCommander/Platform/main.mm",
+    "file": "/Users/tomasz/Documents/MCommander/MCommander/Platform/main.mm"
+  }
+]

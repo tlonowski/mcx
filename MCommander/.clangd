@@ -1,0 +1,12 @@
+CompileFlags:
+  Add:
+    - -std=gnu++20
+    - -I/Users/tomasz/Documents/MCommander/MCommander
+    - -I/Users/tomasz/Documents/MCommander/MCommander/Core
+    - -I/Users/tomasz/Documents/MCommander/MCommander/UI
+    - -I/Users/tomasz/Documents/MCommander/MCommander/Platform
+    - -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui
+    - -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/backends
+    - -I/Users/tomasz/Documents/MCommander/MCommander/Vendor/imgui/misc/cpp
+Diagnostics:
+  UnusedIncludes: None
