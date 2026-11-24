@@ -16,6 +16,21 @@ std::string homeDirectory() {
     return home ? std::string([home UTF8String]) : "/Users";
 }
 
+std::vector<std::string> localeSearchDirectories() {
+    std::vector<std::string> dirs;
+    // 1. User custom locales override
+    std::string userLocales = homeDirectory() + "/Library/Application Support/mcx/Locales";
+    dirs.push_back(userLocales);
+    // 2. App bundle Resources/Locales and Resources/
+    NSString* resPath = [[NSBundle mainBundle] resourcePath];
+    if (resPath) {
+        std::string res([resPath UTF8String]);
+        dirs.push_back(res + "/Locales");
+        dirs.push_back(res);
+    }
+    return dirs;
+}
+
 bool isPackagePath(const std::string& path) {
     NSURL* url = urlFromPath(path);
     if (!url) return false;
@@ -243,17 +258,24 @@ AppSettings loadAppSettings() {
     }
     if (NSNumber* hid = dict[@"showHiddenFiles"]) s.showHiddenFiles = hid.boolValue;
     if (NSNumber* insp = dict[@"showInspector"]) s.showInspector = insp.boolValue;
+    if (NSString* lang = dict[@"language"]) {
+        if ([lang isKindOfClass:[NSString class]] && lang.length > 0) {
+            s.language = std::string([lang UTF8String]);
+        }
+    }
     return s;
 }
 
 void saveAppSettings(const AppSettings& settings) {
+    NSString* lang = [NSString stringWithUTF8String:settings.language.c_str()] ?: @"pl";
     NSDictionary* dict = @{
         @"leftPane": encodePaneSettings(settings.leftPane),
         @"rightPane": encodePaneSettings(settings.rightPane),
         @"activeSide": @(settings.activeSide == PaneSide::Right ? 1 : 0),
         @"splitRatio": @(settings.splitRatio),
         @"showHiddenFiles": @(settings.showHiddenFiles),
-        @"showInspector": @(settings.showInspector)
+        @"showInspector": @(settings.showInspector),
+        @"language": lang
     };
     NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
     [defaults setObject:dict forKey:kAppSettingsKey];

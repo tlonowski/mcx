@@ -1,4 +1,5 @@
 #include "CommanderEngine.hpp"
+#include "Localization.hpp"
 #include "../Platform/MacBridge.hpp"
 
 #include <algorithm>
@@ -35,6 +36,7 @@ CommanderEngine::CommanderEngine()
     : leftPane(PaneSide::Left, platform::homeDirectory()),
       rightPane(PaneSide::Right, initialRightPath(platform::homeDirectory())) {
     AppSettings saved = platform::loadAppSettings();
+    Localization::instance().initialize(platform::localeSearchDirectories(), saved.language);
     activeSide = saved.activeSide;
     splitRatio = saved.splitRatio;
     showHiddenFiles = saved.showHiddenFiles;
@@ -102,6 +104,7 @@ void CommanderEngine::saveSettings() const {
     s.splitRatio = splitRatio;
     s.showHiddenFiles = showHiddenFiles;
     s.showInspector = showInspector;
+    s.language = Localization::instance().currentLanguage();
     platform::saveAppSettings(s);
 }
 

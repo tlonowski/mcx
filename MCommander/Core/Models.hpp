@@ -195,6 +195,7 @@ struct AppSettings {
     float splitRatio = 0.5f;
     bool showHiddenFiles = false;
     bool showInspector = false;
+    std::string language = "pl";
 };
 
 std::string formatByteCount(int64_t bytes);

@@ -1,4 +1,5 @@
 #include "CommanderUI.hpp"
+#include "../Core/Localization.hpp"
 #include "../Core/Version.hpp"
 #include "../Platform/MacBridge.hpp"
 #include "../Vendor/imgui/imgui.h"
@@ -638,181 +639,195 @@ void CommanderUI::renderTopToolbar() {
 
   // Classic Midnight Commander 5 top pull-down menus (Lewy | Plik | Polecenie |
   // Opcje | Prawy)
-  if (boxButton("Lewy ▾"))
+  if (boxButton(tr("menu.left")))
     ImGui::OpenPopup("##MCTopMenuLeft");
   ImVec2 bMin = ImGui::GetItemRectMin(), bMax = ImGui::GetItemRectMax();
   if (beginDropdownPopup("##MCTopMenuLeft", bMin, bMax)) {
     auto &lTab = engine_.leftPane.activeTab();
-    if (ImGui::MenuItem("Widok: Pełny (5 kolumn)", "⌘2", !lTab.briefMode))
+    if (ImGui::MenuItem(tr("menu.view_full"), "⌘2", !lTab.briefMode))
       lTab.briefMode = false;
-    if (ImGui::MenuItem("Widok: Krótki", "⌘1", lTab.briefMode))
+    if (ImGui::MenuItem(tr("menu.view_brief"), "⌘1", lTab.briefMode))
       lTab.briefMode = true;
-    if (ImGui::MenuItem("Panel Info MC", "Ctrl+I", engine_.infoPanelActive))
+    if (ImGui::MenuItem(tr("menu.info_panel"), "Ctrl+I",
+                        engine_.infoPanelActive))
       engine_.toggleInfoPanel();
-    if (ImGui::MenuItem("Szybki podgląd pliku", "Ctrl+Q",
+    if (ImGui::MenuItem(tr("menu.quick_view"), "Ctrl+Q",
                         engine_.quickView.active))
       engine_.toggleQuickView();
     ImGui::Separator();
-    if (ImGui::MenuItem("Sortuj: Nazwa", "Ctrl+F3",
+    if (ImGui::MenuItem(tr("menu.sort_name"), "Ctrl+F3",
                         lTab.sortField == FileSortField::Name))
       lTab.toggleSort(FileSortField::Name);
-    if (ImGui::MenuItem("Sortuj: Rozszerzenie", "Ctrl+F4",
+    if (ImGui::MenuItem(tr("menu.sort_ext"), "Ctrl+F4",
                         lTab.sortField == FileSortField::Extension))
       lTab.toggleSort(FileSortField::Extension);
-    if (ImGui::MenuItem("Sortuj: Data modyfikacji", "Ctrl+F5",
+    if (ImGui::MenuItem(tr("menu.sort_date"), "Ctrl+F5",
                         lTab.sortField == FileSortField::ModificationDate))
       lTab.toggleSort(FileSortField::ModificationDate);
-    if (ImGui::MenuItem("Sortuj: Rozmiar", "Ctrl+F6",
+    if (ImGui::MenuItem(tr("menu.sort_size"), "Ctrl+F6",
                         lTab.sortField == FileSortField::Size))
       lTab.toggleSort(FileSortField::Size);
     ImGui::Separator();
-    if (ImGui::MenuItem("Odśwież lewy panel", "⌘R"))
+    if (ImGui::MenuItem(tr("menu.refresh_left"), "⌘R"))
       engine_.refreshPane(PaneSide::Left);
     endDropdownPopup();
   }
   ImGui::SameLine();
 
-  if (boxButton("Plik ▾"))
+  if (boxButton(tr("menu.file")))
     ImGui::OpenPopup("##MCTopMenuFile");
   bMin = ImGui::GetItemRectMin();
   bMax = ImGui::GetItemRectMax();
   if (beginDropdownPopup("##MCTopMenuFile", bMin, bMax)) {
-    if (ImGui::MenuItem("Podgląd Lister", "F3"))
+    if (ImGui::MenuItem(tr("menu.f3_view"), "F3"))
       engine_.triggerF3View();
-    if (ImGui::MenuItem("Edycja pliku", "F4"))
+    if (ImGui::MenuItem(tr("menu.f4_edit"), "F4"))
       engine_.triggerF4Edit();
-    if (ImGui::MenuItem("Kopiuj", "F5"))
+    if (ImGui::MenuItem(tr("menu.f5_copy"), "F5"))
       engine_.triggerF5Copy();
-    if (ImGui::MenuItem("Przenieś", "F6"))
+    if (ImGui::MenuItem(tr("menu.f6_move"), "F6"))
       engine_.triggerF6Move();
-    if (ImGui::MenuItem("Zmień nazwę", "Shift+F6"))
+    if (ImGui::MenuItem(tr("menu.rename"), "Shift+F6"))
       engine_.triggerRename();
-    if (ImGui::MenuItem("Nowy katalog", "F7"))
+    if (ImGui::MenuItem(tr("menu.f7_mkdir"), "F7"))
       engine_.triggerF7NewFolder();
-    if (ImGui::MenuItem("Usuń", "F8"))
+    if (ImGui::MenuItem(tr("menu.f8_delete"), "F8"))
       engine_.triggerF8Delete();
     ImGui::Separator();
-    if (ImGui::MenuItem("Utwórz Symlink…"))
+    if (ImGui::MenuItem(tr("menu.symlink")))
       engine_.triggerCreateLink(false, false);
-    if (ImGui::MenuItem("Utwórz względny Symlink…"))
+    if (ImGui::MenuItem(tr("menu.rel_symlink")))
       engine_.triggerCreateLink(false, true);
-    if (ImGui::MenuItem("Utwórz Hardlink…"))
+    if (ImGui::MenuItem(tr("menu.hardlink")))
       engine_.triggerCreateLink(true, false);
     ImGui::Separator();
-    if (ImGui::MenuItem("Atrybuty POSIX (chmod)…"))
+    if (ImGui::MenuItem(tr("menu.chmod")))
       engine_.triggerChmod();
-    if (ImGui::MenuItem("Wielokrotna zmiana nazw…", "⌘M"))
+    if (ImGui::MenuItem(tr("menu.multirename"), "⌘M"))
       engine_.triggerMultiRename();
     ImGui::Separator();
-    if (ImGui::MenuItem("Zaznacz grupę…", "+"))
+    if (ImGui::MenuItem(tr("menu.sel_group"), "+"))
       engine_.triggerSelectByPattern(true);
-    if (ImGui::MenuItem("Odznacz grupę…", "-"))
+    if (ImGui::MenuItem(tr("menu.unsel_group"), "-"))
       engine_.triggerSelectByPattern(false);
-    if (ImGui::MenuItem("Odwróć zaznaczenie", "*"))
+    if (ImGui::MenuItem(tr("menu.invert_sel"), "*"))
       engine_.activePane().activeTab().invertSelection();
     endDropdownPopup();
   }
   ImGui::SameLine();
 
-  if (boxButton("Polecenie ▾"))
+  if (boxButton(tr("menu.command")))
     ImGui::OpenPopup("##MCTopMenuCmd");
   bMin = ImGui::GetItemRectMin();
   bMax = ImGui::GetItemRectMax();
   if (beginDropdownPopup("##MCTopMenuCmd", bMin, bMax)) {
-    if (ImGui::MenuItem("Menu użytkownika MC", "F2"))
+    if (ImGui::MenuItem(tr("menu.user_menu"), "F2"))
       engine_.triggerF2UserMenu();
-    if (ImGui::MenuItem("Szukaj plików…", "Alt+F7"))
+    if (ImGui::MenuItem(tr("menu.find_files"), "Alt+F7"))
       engine_.triggerFindFiles();
-    if (ImGui::MenuItem("Wielokrotna zmiana nazw (Multi-Rename)…", "⌘M"))
+    if (ImGui::MenuItem(tr("menu.multirename"), "⌘M"))
       engine_.triggerMultiRename();
-    if (ImGui::MenuItem("Porównaj katalogi", "⇧⌘C"))
+    if (ImGui::MenuItem(tr("menu.compare_dirs"), "⇧⌘C"))
       engine_.compareDirectories();
-    if (ImGui::MenuItem("Porównaj dwa pliki (diff -u)…"))
+    if (ImGui::MenuItem(tr("menu.diff_files")))
       engine_.triggerDiffFiles();
-    if (ImGui::MenuItem("Synchronizuj katalogi…"))
+    if (ImGui::MenuItem(tr("menu.sync_dirs")))
       engine_.triggerSyncDirs();
     ImGui::Separator();
-    if (ImGui::MenuItem("Pakuj do .7z / .zip / .tar.gz…", "Alt+F5"))
+    if (ImGui::MenuItem(tr("menu.pack_archive"), "Alt+F5"))
       engine_.triggerPackArchive();
-    if (ImGui::MenuItem("Rozpakuj archiwum…", "Alt+F9"))
+    if (ImGui::MenuItem(tr("menu.unpack_archive"), "Alt+F9"))
       engine_.triggerUnpackArchive();
-    if (ImGui::MenuItem("Sumy kontrolne SHA-256 / MD5…"))
+    if (ImGui::MenuItem(tr("menu.checksums")))
       engine_.triggerChecksums();
-    if (ImGui::MenuItem("Oblicz rozmiary katalogów", "Alt+Shift+Enter"))
+    if (ImGui::MenuItem(tr("menu.dir_sizes"), "Alt+Shift+Enter"))
       engine_.calculateAllDirectorySizes();
     ImGui::Separator();
-    if (ImGui::MenuItem("Panel Info MC w drugim oknie", "Ctrl+I",
+    if (ImGui::MenuItem(tr("menu.info_panel_opp"), "Ctrl+I",
                         engine_.infoPanelActive))
       engine_.toggleInfoPanel();
-    if (ImGui::MenuItem("Szybki podgląd w drugim oknie", "Ctrl+Q",
+    if (ImGui::MenuItem(tr("menu.quick_view_opp"), "Ctrl+Q",
                         engine_.quickView.active))
       engine_.toggleQuickView();
-    if (ImGui::MenuItem("Powłoka pełnoekranowa (Subshell)", "Ctrl+O",
+    if (ImGui::MenuItem(tr("menu.subshell"), "Ctrl+O",
                         engine_.subshellFullScreen))
       engine_.toggleSubshell();
-    if (ImGui::MenuItem("Otwórz aktywny katalog w Terminalu")) {
+    if (ImGui::MenuItem(tr("menu.open_terminal"))) {
       platform::openInTerminal(engine_.activePane().activeTab().currentPath);
     }
     ImGui::Separator();
-    if (ImGui::MenuItem("Podręczna lista katalogów (Hotlist)", "⌘D")) {
+    if (ImGui::MenuItem(tr("menu.hotlist"), "⌘D")) {
       hotlistSide_ = engine_.activeSide;
       engine_.requestHotlistPopup = true;
     }
-    if (ImGui::MenuItem("Zamień panele", "Ctrl+U"))
+    if (ImGui::MenuItem(tr("menu.swap_panes"), "Ctrl+U"))
       engine_.swapPanes();
-    if (ImGui::MenuItem("Wyrównaj panele (Target = Source)", "⌥⌘="))
+    if (ImGui::MenuItem(tr("menu.sync_panes"), "⌥⌘="))
       engine_.syncInactivePaneToActive();
-    if (ImGui::MenuItem("Katalog spod kursora w 2. panelu", "Alt+O"))
+    if (ImGui::MenuItem(tr("menu.open_in_opp"), "Alt+O"))
       engine_.openCursorDirInOppositePane();
     endDropdownPopup();
   }
   ImGui::SameLine();
 
-  if (boxButton("Opcje ▾"))
+  if (boxButton(tr("menu.options")))
     ImGui::OpenPopup("##MCTopMenuOpts");
   bMin = ImGui::GetItemRectMin();
   bMax = ImGui::GetItemRectMax();
   if (beginDropdownPopup("##MCTopMenuOpts", bMin, bMax)) {
-    if (ImGui::MenuItem("Pokaż pliki ukryte (dotfiles)", "Alt+.",
+    if (ImGui::MenuItem(tr("menu.show_hidden"), "Alt+.",
                         engine_.showHiddenFiles))
       engine_.toggleHiddenFiles();
-    if (ImGui::MenuItem("Boczny panel Inspektora", "⌘I", engine_.showInspector))
+    if (ImGui::MenuItem(tr("menu.inspector"), "⌘I", engine_.showInspector))
       engine_.showInspector = !engine_.showInspector;
-    if (ImGui::MenuItem("Panel Info MC w drugim oknie", "Ctrl+I",
+    if (ImGui::MenuItem(tr("menu.info_panel_opp"), "Ctrl+I",
                         engine_.infoPanelActive))
       engine_.toggleInfoPanel();
-    if (ImGui::MenuItem("Szybki podgląd w drugim oknie", "Ctrl+Q",
+    if (ImGui::MenuItem(tr("menu.quick_view_opp"), "Ctrl+Q",
                         engine_.quickView.active))
       engine_.toggleQuickView();
+    ImGui::Separator();
+    if (ImGui::BeginMenu(tr("menu.language"))) {
+      auto &loc = Localization::instance();
+      for (const auto &info : loc.availableLocales()) {
+        bool selected = (info.code == loc.currentLanguage());
+        std::string itemText = info.displayName + " (" + info.code + ")";
+        if (ImGui::MenuItem(itemText.c_str(), nullptr, selected)) {
+          loc.setLanguage(info.code);
+          engine_.saveSettings();
+        }
+      }
+      ImGui::EndMenu();
+    }
     endDropdownPopup();
   }
   ImGui::SameLine();
 
-  if (boxButton("Prawy ▾"))
+  if (boxButton(tr("menu.right")))
     ImGui::OpenPopup("##MCTopMenuRight");
   bMin = ImGui::GetItemRectMin();
   bMax = ImGui::GetItemRectMax();
   if (beginDropdownPopup("##MCTopMenuRight", bMin, bMax)) {
     auto &rTab = engine_.rightPane.activeTab();
-    if (ImGui::MenuItem("Widok: Pełny (5 kolumn)", nullptr, !rTab.briefMode))
+    if (ImGui::MenuItem(tr("menu.view_full"), nullptr, !rTab.briefMode))
       rTab.briefMode = false;
-    if (ImGui::MenuItem("Widok: Krótki", nullptr, rTab.briefMode))
+    if (ImGui::MenuItem(tr("menu.view_brief"), nullptr, rTab.briefMode))
       rTab.briefMode = true;
     ImGui::Separator();
-    if (ImGui::MenuItem("Sortuj: Nazwa", nullptr,
+    if (ImGui::MenuItem(tr("menu.sort_name"), nullptr,
                         rTab.sortField == FileSortField::Name))
       rTab.toggleSort(FileSortField::Name);
-    if (ImGui::MenuItem("Sortuj: Rozszerzenie", nullptr,
+    if (ImGui::MenuItem(tr("menu.sort_ext"), nullptr,
                         rTab.sortField == FileSortField::Extension))
       rTab.toggleSort(FileSortField::Extension);
-    if (ImGui::MenuItem("Sortuj: Data modyfikacji", nullptr,
+    if (ImGui::MenuItem(tr("menu.sort_date"), nullptr,
                         rTab.sortField == FileSortField::ModificationDate))
       rTab.toggleSort(FileSortField::ModificationDate);
-    if (ImGui::MenuItem("Sortuj: Rozmiar", nullptr,
+    if (ImGui::MenuItem(tr("menu.sort_size"), nullptr,
                         rTab.sortField == FileSortField::Size))
       rTab.toggleSort(FileSortField::Size);
     ImGui::Separator();
-    if (ImGui::MenuItem("Odśwież prawy panel"))
+    if (ImGui::MenuItem(tr("menu.refresh_right")))
       engine_.refreshPane(PaneSide::Right);
     endDropdownPopup();
   }
@@ -1057,7 +1072,7 @@ void CommanderUI::renderFilePane(PaneState &pane, float width, float height) {
       focusFilterNextFrame_ = false;
     }
     ImGui::SetNextItemWidth(filterW);
-    if (ImGui::InputTextWithHint("##QuickFilter", "Filtr (^S / ⌘F)",
+    if (ImGui::InputTextWithHint("##QuickFilter", tr("filter.hint"),
                                  &tab.filterText)) {
       tab.recomputeDisplayedItems();
     }
@@ -1100,19 +1115,19 @@ void CommanderUI::renderFilePane(PaneState &pane, float width, float height) {
     if (ImGui::BeginTable("##TCFileTable", colCount, tFlags,
                           ImVec2(width, tableH))) {
       ImGui::TableSetupScrollFreeze(0, 1);
-      ImGui::TableSetupColumn("Nazwa",
+      ImGui::TableSetupColumn(tr("col.name"),
                               ImGuiTableColumnFlags_WidthStretch |
                                   ImGuiTableColumnFlags_DefaultSort,
                               0.0f, 0);
-      ImGui::TableSetupColumn("Rozsz.", ImGuiTableColumnFlags_WidthFixed, 64.0f,
-                              1);
+      ImGui::TableSetupColumn(tr("col.ext"), ImGuiTableColumnFlags_WidthFixed,
+                              64.0f, 1);
       if (!tab.briefMode) {
-        ImGui::TableSetupColumn("Rozmiar", ImGuiTableColumnFlags_WidthFixed,
-                                92.0f, 2);
-        ImGui::TableSetupColumn("Data", ImGuiTableColumnFlags_WidthFixed,
-                                118.0f, 3);
-        ImGui::TableSetupColumn("Atryb.", ImGuiTableColumnFlags_WidthFixed,
-                                82.0f, 4);
+        ImGui::TableSetupColumn(tr("col.size"),
+                                ImGuiTableColumnFlags_WidthFixed, 92.0f, 2);
+        ImGui::TableSetupColumn(tr("col.date"),
+                                ImGuiTableColumnFlags_WidthFixed, 118.0f, 3);
+        ImGui::TableSetupColumn(tr("col.attr"),
+                                ImGuiTableColumnFlags_WidthFixed, 82.0f, 4);
       }
       ImGui::PushStyleColor(ImGuiCol_Text,
                             isActive ? AntigravityColors::headerYellow
@@ -1723,14 +1738,13 @@ void CommanderUI::renderCommandBar() {
   }
   bool enter = ImGui::InputTextWithHint(
       "##TCCmdInput",
-      "Polecenie zsh (⌘Enter = wstaw nazwę pliku pod kursorem, ⇧⌘Enter = pełna "
-      "ścieżka)…",
+      tr("cmd.hint"),
       &engine_.commandInput, ImGuiInputTextFlags_EnterReturnsTrue);
   if (fonts_.mono)
     ImGui::PopFont();
 
   ImGui::SameLine();
-  if ((enter || boxButton(engine_.isRunningCommand ? "…" : "Wykonaj", false,
+  if ((enter || boxButton(engine_.isRunningCommand ? "…" : tr("cmd.run"), false,
                           AntigravityColors::accent, ImVec2(btnW, 21.0f))) &&
       !engine_.isRunningCommand) {
     engine_.runCommandInput();
@@ -1750,14 +1764,14 @@ void CommanderUI::renderFunctionKeyBar() {
 
   struct FKeyCell {
     const char *key;
-    const char *label;
+    const char *labelKey;
     int actionID;
   };
   static const FKeyCell cells[10] = {
-      {"F1", "Pomoc", 1},   {"F2", "Menu", 2},   {"F3", "Podgląd", 3},
-      {"F4", "Edycja", 4},  {"F5", "Kopiuj", 5}, {"F6", "Przenieś", 6},
-      {"F7", "NowyKat", 7}, {"F8", "Usuń", 8},   {"F9", "GórneMenu", 9},
-      {"F10", "Koniec", 10}};
+      {"F1", "fkey.1", 1}, {"F2", "fkey.2", 2},   {"F3", "fkey.3", 3},
+      {"F4", "fkey.4", 4}, {"F5", "fkey.5", 5},   {"F6", "fkey.6", 6},
+      {"F7", "fkey.7", 7}, {"F8", "fkey.8", 8},   {"F9", "fkey.9", 9},
+      {"F10", "fkey.10", 10}};
 
   float totalW = ImGui::GetWindowWidth();
   float cellW = std::floor(totalW / 10.0f);
@@ -1774,7 +1788,7 @@ void CommanderUI::renderFunctionKeyBar() {
                           AntigravityColors::bgCursorActive);
     ImGui::PushStyleColor(ImGuiCol_Border, AntigravityColors::borderSubtle);
 
-    std::string full = std::string(cells[i].key) + " " + cells[i].label;
+    std::string full = std::string(cells[i].key) + " " + tr(cells[i].labelKey);
     if (ImGui::Button(full.c_str(), ImVec2(w, 30.0f))) {
       switch (cells[i].actionID) {
       case 1:

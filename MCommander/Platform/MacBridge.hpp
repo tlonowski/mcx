@@ -7,6 +7,7 @@
 namespace mc::platform {
 
 std::string homeDirectory();
+std::vector<std::string> localeSearchDirectories();
 bool isPackagePath(const std::string& path);
 std::string localizedTypeDescription(const std::string& path, bool isDirectory);
 std::vector<MountedVolume> mountedVolumes();
