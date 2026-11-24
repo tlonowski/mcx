@@ -23,6 +23,8 @@ struct PaneFooterStats {
 struct PaneTabState {
     uint64_t id = 0;
     std::string currentPath;
+    std::string archivePath;   // Non-empty when browsing inside an archive (VFS)
+    std::string archiveSubdir; // Relative folder inside archive
     std::vector<FileItem> items;
     std::vector<FileItem> displayedItems;
     std::string filterText;
@@ -46,9 +48,10 @@ struct PaneTabState {
     static constexpr const char* kParentEntryPath = "__MC_PARENT_ENTRY__";
 
     std::string title() const;
+    bool isInsideArchive() const { return !archivePath.empty(); }
     bool canGoBack() const { return !historyBack.empty(); }
     bool canGoForward() const { return !historyForward.empty(); }
-    bool canGoUp() const { return currentPath != "/"; }
+    bool canGoUp() const { return isInsideArchive() || currentPath != "/"; }
 
     std::vector<FileItem> selectedItems() const;
     const FileItem* cursorItem() const;

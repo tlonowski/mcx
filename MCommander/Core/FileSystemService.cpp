@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <copyfile.h>
 #include <cstdio>
 #include <cstring>
 #include <dirent.h>
@@ -319,6 +320,75 @@ bool FileSystemService::trashItemsSync(const std::vector<std::string>& paths, st
     return true;
 }
 
+namespace {
+
+struct CopyProgressContext {
+    const std::atomic<bool>* cancelFlag = nullptr;
+    const std::function<void(const FileOperationProgress&)>* onProgress = nullptr;
+    std::string title;
+    std::string currentItemName;
+    int completedCount = 0;
+    int totalCount = 0;
+    int64_t baseBytes = 0;
+    int64_t totalBytes = 0;
+    int64_t lastReportedBytes = 0;
+};
+
+int copyfileProgressCallback(int what, int stage, copyfile_state_t state, const char* src, const char* /*dst*/, void* ctxPtr) {
+    auto* ctx = static_cast<CopyProgressContext*>(ctxPtr);
+    if (!ctx) return COPYFILE_CONTINUE;
+    if (ctx->cancelFlag && ctx->cancelFlag->load(std::memory_order_relaxed)) {
+        return COPYFILE_QUIT;
+    }
+    if (what == COPYFILE_COPY_DATA && (stage == COPYFILE_PROGRESS || stage == COPYFILE_FINISH)) {
+        off_t copied = 0;
+        if (copyfile_state_get(state, COPYFILE_STATE_COPIED, &copied) == 0) {
+            int64_t totalNow = ctx->baseBytes + static_cast<int64_t>(copied);
+            if (totalNow - ctx->lastReportedBytes >= 65536 || stage == COPYFILE_FINISH) {
+                ctx->lastReportedBytes = totalNow;
+                if (ctx->onProgress && *ctx->onProgress) {
+                    FileOperationProgress prog;
+                    prog.title = ctx->title;
+                    prog.currentItemName = (src && src[0]) ? fs::path(src).filename().string() : ctx->currentItemName;
+                    prog.completedCount = ctx->completedCount;
+                    prog.totalCount = ctx->totalCount;
+                    prog.currentBytes = totalNow;
+                    prog.totalBytes = ctx->totalBytes;
+                    (*ctx->onProgress)(prog);
+                }
+            }
+        }
+    }
+    return COPYFILE_CONTINUE;
+}
+
+bool copyWithMacOSCopyfile(const fs::path& src, const fs::path& dst, CopyProgressContext& ctx, std::string& errorOut, bool& wasCancelled) {
+    copyfile_state_t state = copyfile_state_alloc();
+    copyfile_state_set(state, COPYFILE_STATE_STATUS_CB, reinterpret_cast<const void*>(&copyfileProgressCallback));
+    copyfile_state_set(state, COPYFILE_STATE_STATUS_CTX, &ctx);
+
+    copyfile_flags_t flags = COPYFILE_ALL | COPYFILE_NOFOLLOW_SRC;
+    std::error_code ec;
+    if (fs::is_directory(src, ec) && !fs::is_symlink(src, ec)) {
+        flags |= COPYFILE_RECURSIVE;
+    }
+
+    int rc = copyfile(src.c_str(), dst.c_str(), state, flags);
+    if (rc != 0) {
+        if (ctx.cancelFlag && ctx.cancelFlag->load(std::memory_order_relaxed)) {
+            wasCancelled = true;
+        } else {
+            errorOut = std::strerror(errno);
+        }
+        copyfile_state_free(state);
+        return false;
+    }
+    copyfile_state_free(state);
+    return true;
+}
+
+} // namespace
+
 TransferOutcome FileSystemService::transferItemsSync(
     const std::vector<std::string>& sourcePaths,
     const std::string& destinationDirectory,
@@ -335,6 +405,23 @@ TransferOutcome FileSystemService::transferItemsSync(
     fs::path destDirCanon = fs::weakly_canonical(fs::path(destinationDirectory), ec);
     if (ec) destDirCanon = fs::path(destinationDirectory);
 
+    // Precompute total bytes for smooth byte-level progress
+    std::vector<int64_t> itemByteSizes(sourcePaths.size(), 0);
+    int64_t grandTotalBytes = 0;
+    for (size_t i = 0; i < sourcePaths.size(); ++i) {
+        struct stat st{};
+        if (lstat(sourcePaths[i].c_str(), &st) == 0) {
+            if (S_ISDIR(st.st_mode)) {
+                itemByteSizes[i] = calculateDirectorySizeSync(sourcePaths[i]);
+            } else {
+                itemByteSizes[i] = static_cast<int64_t>(st.st_size);
+            }
+            grandTotalBytes += itemByteSizes[i];
+        }
+    }
+
+    int64_t completedBytes = 0;
+
     for (size_t i = 0; i < sourcePaths.size(); ++i) {
         if (cancelFlag.load(std::memory_order_relaxed)) {
             outcome.status = TransferStatus::Cancelled;
@@ -345,7 +432,14 @@ TransferOutcome FileSystemService::transferItemsSync(
         std::string itemName = src.filename().string();
 
         if (onProgress) {
-            onProgress(FileOperationProgress{title, itemName, static_cast<int>(i), total});
+            FileOperationProgress prog;
+            prog.title = title;
+            prog.currentItemName = itemName;
+            prog.completedCount = static_cast<int>(i);
+            prog.totalCount = total;
+            prog.currentBytes = completedBytes;
+            prog.totalBytes = grandTotalBytes;
+            onProgress(prog);
         }
 
         fs::path srcCanon = fs::weakly_canonical(src, ec);
@@ -370,6 +464,7 @@ TransferOutcome FileSystemService::transferItemsSync(
             if (policy == ConflictResolutionPolicy::KeepBoth) {
                 target = uniqueDestinationPath(target);
             } else {
+                completedBytes += itemByteSizes[i];
                 continue;
             }
         }
@@ -386,6 +481,7 @@ TransferOutcome FileSystemService::transferItemsSync(
                     return outcome;
                 }
                 case ConflictResolutionPolicy::Skip:
+                    completedBytes += itemByteSizes[i];
                     continue;
                 case ConflictResolutionPolicy::Overwrite:
                     fs::remove_all(target, ec);
@@ -401,14 +497,24 @@ TransferOutcome FileSystemService::transferItemsSync(
             }
         }
 
+        CopyProgressContext ctx;
+        ctx.cancelFlag = &cancelFlag;
+        ctx.onProgress = &onProgress;
+        ctx.title = title;
+        ctx.currentItemName = itemName;
+        ctx.completedCount = static_cast<int>(i);
+        ctx.totalCount = total;
+        ctx.baseBytes = completedBytes;
+        ctx.totalBytes = grandTotalBytes;
+
         if (isMove) {
             fs::rename(src, target, ec);
             if (ec) {
-                // Cross-device move fallback: copy then remove
-                fs::copy(src, target, fs::copy_options::recursive | fs::copy_options::copy_symlinks, ec);
-                if (ec) {
-                    outcome.status = TransferStatus::Error;
-                    outcome.errorMessage = ec.message();
+                std::string cpErr;
+                bool cancelled = false;
+                if (!copyWithMacOSCopyfile(src, target, ctx, cpErr, cancelled)) {
+                    outcome.status = cancelled ? TransferStatus::Cancelled : TransferStatus::Error;
+                    outcome.errorMessage = cpErr;
                     return outcome;
                 }
                 fs::remove_all(src, ec);
@@ -419,17 +525,27 @@ TransferOutcome FileSystemService::transferItemsSync(
                 }
             }
         } else {
-            fs::copy(src, target, fs::copy_options::recursive | fs::copy_options::copy_symlinks, ec);
-            if (ec) {
-                outcome.status = TransferStatus::Error;
-                outcome.errorMessage = ec.message();
+            std::string cpErr;
+            bool cancelled = false;
+            if (!copyWithMacOSCopyfile(src, target, ctx, cpErr, cancelled)) {
+                outcome.status = cancelled ? TransferStatus::Cancelled : TransferStatus::Error;
+                outcome.errorMessage = cpErr;
                 return outcome;
             }
         }
+
+        completedBytes += itemByteSizes[i];
     }
 
     if (onProgress) {
-        onProgress(FileOperationProgress{title, "", total, total});
+        FileOperationProgress prog;
+        prog.title = title;
+        prog.currentItemName = "";
+        prog.completedCount = total;
+        prog.totalCount = total;
+        prog.currentBytes = grandTotalBytes;
+        prog.totalBytes = grandTotalBytes;
+        onProgress(prog);
     }
     return outcome;
 }

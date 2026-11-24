@@ -21,6 +21,9 @@ bool ejectVolume(const std::string& path, std::string& errorOut);
 void copyToClipboard(const std::string& text);
 void showQuickLook(const std::string& path);
 
+void* loadMetalTexture(const std::string& imagePath, void* mtlDevice, int& outWidth, int& outHeight);
+void releaseMetalTexture(void* texturePtr);
+
 std::vector<FavoriteLocation> loadCustomFavorites();
 void saveCustomFavorites(const std::vector<FavoriteLocation>& custom);
 

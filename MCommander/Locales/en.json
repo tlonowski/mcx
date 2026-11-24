@@ -126,5 +126,27 @@
   "dlg.editor": "Editor (F4)",
   "dlg.search": "Find Files (⌥F7)",
   "dlg.sync": "Synchronize Directories",
-  "dlg.multirename": "Multi-Rename Tool (⌘M)"
+  "dlg.multirename": "Multi-Rename Tool (⌘M)",
+
+  "common.cancel": "Cancel",
+  "dialog.copy.title": "Copy (F5)",
+  "dialog.copy.prompt": "Copy",
+  "dialog.copy.btn": "OK (F5)",
+  "dialog.move.title": "Move (F6)",
+  "dialog.move.prompt": "Move",
+  "dialog.move.btn": "OK (F6)",
+  "dialog.extract.title": "Extract from Archive (F5)",
+  "dialog.extract.prompt": "Extract",
+  "dialog.extract.btn": "Extract",
+  "dialog.transfer.dest": "To directory:",
+  "dialog.transfer.conflict": "On name conflict:",
+  "dialog.transfer.ask": "Ask",
+  "dialog.transfer.overwrite": "Overwrite",
+  "dialog.transfer.skip": "Skip",
+  "dialog.transfer.keep_both": "Keep Both",
+  "dialog.transfer.background": "In Background",
+  "dialog.transfer.in_background": "BACKGROUND",
+  "dialog.create_file.title": "New File (Shift+F4)",
+  "dialog.create_file.prompt": "New file name:",
+  "dialog.create_file.btn": "Create & Edit"
 }

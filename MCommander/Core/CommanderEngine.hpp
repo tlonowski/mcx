@@ -12,6 +12,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace mc {
@@ -37,7 +38,8 @@ enum class DialogKind {
     Help,
     UserMenu,
     CreateLink,
-    DiffViewer
+    DiffViewer,
+    CreateFile
 };
 
 struct QuickViewState {
@@ -46,6 +48,10 @@ struct QuickViewState {
     bool hexMode = false;
     bool isBinary = false;
     bool isDirectory = false;
+    bool isImage = false;
+    void* imageTexture = nullptr;
+    int imageWidth = 0;
+    int imageHeight = 0;
     int64_t fileCount = 0;
     int64_t dirCount = 0;
     int64_t totalBytes = 0;
@@ -63,6 +69,8 @@ struct DialogState {
     std::vector<FileItem> targetItems;
     std::string destinationPath;
     bool isMove = false;
+    bool transferInBackground = false;
+    std::string fromArchivePath;
     bool isSelectingPattern = true;
     ConflictResolutionPolicy conflictPolicy = ConflictResolutionPolicy::Ask;
 
@@ -86,11 +94,18 @@ struct DialogState {
 
     // Viewer / Editor
     bool viewerHexMode = false;
+    bool viewerIsImage = false;
+    void* viewerImageTexture = nullptr;
+    int viewerImageWidth = 0;
+    int viewerImageHeight = 0;
     std::string viewerText;
     std::string viewerHexText;
     std::string viewerSearchQuery;
     std::string editorBuffer;
     bool editorDirty = false;
+
+    // Editable User Menu (F2)
+    std::vector<UserMenuItem> userMenuItems;
 
     // Synchronize Directories
     std::string syncLeftDir;
@@ -158,6 +173,7 @@ public:
     std::optional<FileOperationProgress> operationProgress;
     std::string toastMessage;
     std::string errorAlertMessage;
+    void* mtlDevice = nullptr;
 
     CommanderEngine();
     ~CommanderEngine();
@@ -181,6 +197,7 @@ public:
     void refreshAllVisibleTabs();
     void refreshPane(std::optional<PaneSide> side = std::nullopt);
     void loadDirectory(PaneSide side, uint64_t tabID, const std::string& path, bool preserveSelection = true, std::string selectAfterPath = "");
+    void loadArchiveDirectory(PaneSide side, uint64_t tabID, const std::string& archivePath, const std::string& archiveSubdir, const std::string& password = "");
 
     void navigate(const std::string& path, std::optional<PaneSide> side = std::nullopt, bool recordHistory = true);
     void goUp(std::optional<PaneSide> side = std::nullopt);
@@ -205,6 +222,7 @@ public:
     void triggerF3View();
     void triggerQuickLook();
     void triggerF4Edit();
+    void triggerNewFile();
     void triggerF5Copy();
     void triggerF6Move();
     void triggerRename();
@@ -226,12 +244,17 @@ public:
 
     // Actions
     void createFolder(const std::string& name, const std::string& parentPath, PaneSide side);
+    void createEmptyFileAndEdit(const std::string& name, const std::string& parentPath, PaneSide side);
     void renameItem(const FileItem& item, const std::string& newName, PaneSide side);
     void createLink();
     void runQuickCommandInActiveDir(const std::string& cmd, const std::string& title);
+    void executeUserMenuItem(const UserMenuItem& item);
     void deleteItems(const std::vector<FileItem>& items, bool permanently, PaneSide side);
 
-    void startTransfer(const std::vector<std::string>& sourcePaths, const std::string& destDir, bool isMove, ConflictResolutionPolicy policy);
+    void startTransfer(const std::vector<std::string>& sourcePaths, const std::string& destDir, bool isMove, ConflictResolutionPolicy policy, bool inBackground = false);
+    void startArchiveExtract(const std::string& archivePath, const std::vector<std::string>& internalPaths, const std::string& destDir, bool inBackground = false);
+    void handleDroppedFiles(const std::vector<std::string>& paths, PaneSide targetSide, bool isMove);
+    void moveTransferToBackground();
     void resolveConflict(ConflictResolutionPolicy policy);
     void cancelActiveTransfer();
 
@@ -267,10 +290,14 @@ public:
 private:
     std::mutex queueMutex_;
     std::vector<std::function<void()>> mainQueue_;
+    std::mutex workersMutex_;
+    std::vector<std::thread> workers_;
+    std::atomic<bool> shuttingDown_{false};
     std::shared_ptr<std::atomic<bool>> transferCancelFlag_;
     std::chrono::steady_clock::time_point toastExpiry_;
 
     void postMain(std::function<void()> fn);
+    void spawnWorker(std::function<void()> fn);
     void refreshOppositeIfSameFolder(const std::string& folderPath, PaneSide sourceSide);
 };
 

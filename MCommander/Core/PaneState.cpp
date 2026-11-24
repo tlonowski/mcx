@@ -74,6 +74,9 @@ FileItem makeParentEntry(const std::string& currentPath) {
 } // namespace
 
 std::string PaneTabState::title() const {
+    if (isInsideArchive()) {
+        return "[" + fs::path(archivePath).filename().string() + "]";
+    }
     if (currentPath == "/" || currentPath.empty()) return "root (/)";
     std::string name = fs::path(currentPath).filename().string();
     return name.empty() ? "root (/)" : name;

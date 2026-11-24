@@ -30,6 +30,16 @@ std::string normalizeDirPath(const std::string& path) {
     return p.string();
 }
 
+bool isImageExtension(const std::string& name) {
+    auto dot = name.rfind('.');
+    if (dot == std::string::npos) return false;
+    std::string ext = name.substr(dot + 1);
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "gif" ||
+           ext == "bmp" || ext == "tga" || ext == "webp" || ext == "tif" ||
+           ext == "tiff" || ext == "heic" || ext == "ico";
+}
+
 } // namespace
 
 CommanderEngine::CommanderEngine()
@@ -80,6 +90,26 @@ CommanderEngine::CommanderEngine()
 }
 
 CommanderEngine::~CommanderEngine() {
+    shuttingDown_.store(true);
+    if (transferCancelFlag_) transferCancelFlag_->store(true);
+
+    std::vector<std::thread> toJoin;
+    {
+        std::lock_guard<std::mutex> lock(workersMutex_);
+        toJoin = std::move(workers_);
+    }
+    for (auto& t : toJoin) {
+        if (t.joinable()) t.join();
+    }
+
+    if (quickView.imageTexture) {
+        platform::releaseMetalTexture(quickView.imageTexture);
+        quickView.imageTexture = nullptr;
+    }
+    if (dialog.viewerImageTexture) {
+        platform::releaseMetalTexture(dialog.viewerImageTexture);
+        dialog.viewerImageTexture = nullptr;
+    }
     saveSettings();
 }
 
@@ -110,7 +140,15 @@ void CommanderEngine::saveSettings() const {
     platform::saveAppSettings(s);
 }
 
+void CommanderEngine::spawnWorker(std::function<void()> fn) {
+    if (shuttingDown_.load()) return;
+    std::lock_guard<std::mutex> lock(workersMutex_);
+    if (shuttingDown_.load()) return;
+    workers_.emplace_back([fn = std::move(fn)]() { fn(); });
+}
+
 void CommanderEngine::postMain(std::function<void()> fn) {
+    if (shuttingDown_.load()) return;
     std::lock_guard<std::mutex> lock(queueMutex_);
     mainQueue_.push_back(std::move(fn));
 }
@@ -186,74 +224,158 @@ void CommanderEngine::openCursorDirInOppositePane() {
 }
 
 void CommanderEngine::updateQuickViewIfNeeded() {
-    const FileItem* item = activePane().activeTab().cursorItem();
+    const auto& tab = activePane().activeTab();
+    const FileItem* item = tab.cursorItem();
     if (!item || item->isParentEntry) {
         quickView.loadedPath = "";
         quickView.textContent = "Ustaw kursor na pliku lub folderze, aby zobaczyć szybki podgląd (Ctrl+Q / ⌘Q).";
         quickView.hexContent.clear();
         quickView.isDirectory = false;
+        quickView.isImage = false;
+        if (quickView.imageTexture) {
+            platform::releaseMetalTexture(quickView.imageTexture);
+            quickView.imageTexture = nullptr;
+        }
         return;
     }
-    if (quickView.loadedPath == item->path) return;
-    quickView.loadedPath = item->path;
+    std::string targetKey = tab.isInsideArchive() ? (tab.archivePath + "::" + item->path) : item->path;
+    if (quickView.loadedPath == targetKey) return;
+    quickView.loadedPath = targetKey;
+
+    if (quickView.imageTexture) {
+        platform::releaseMetalTexture(quickView.imageTexture);
+        quickView.imageTexture = nullptr;
+    }
+    quickView.isImage = false;
+    quickView.imageWidth = 0;
+    quickView.imageHeight = 0;
+
+    if (tab.isInsideArchive()) {
+        quickView.isDirectory = item->isNavigableDirectory();
+        quickView.isBinary = false;
+        quickView.hexMode = false;
+        quickView.textContent = "(Podgląd niedostępny wewnątrz archiwum — użyj F5 aby rozpakować)";
+        quickView.hexContent.clear();
+        return;
+    }
 
     if (item->isNavigableDirectory()) {
         quickView.isDirectory = true;
         quickView.fileCount = 0;
         quickView.dirCount = 0;
         quickView.totalBytes = 0;
-        std::error_code ec;
-        fs::directory_iterator it(item->path, fs::directory_options::skip_permission_denied, ec);
-        const fs::directory_iterator endIt;
-        while (!ec && it != endIt) {
-            std::error_code statEc;
-            if (it->is_directory(statEc)) {
-                quickView.dirCount++;
-            } else {
-                quickView.fileCount++;
-                uintmax_t sz = it->file_size(statEc);
-                if (!statEc) quickView.totalBytes += static_cast<int64_t>(sz);
+        std::string dirPath = item->path;
+        spawnWorker([this, targetKey, dirPath]() {
+            int64_t dirs = 0, files = 0, total = 0;
+            std::error_code ec;
+            fs::directory_iterator it(dirPath, fs::directory_options::skip_permission_denied, ec);
+            const fs::directory_iterator endIt;
+            while (!ec && it != endIt) {
+                std::error_code statEc;
+                if (it->is_directory(statEc)) {
+                    dirs++;
+                } else {
+                    files++;
+                    uintmax_t sz = it->file_size(statEc);
+                    if (!statEc) total += static_cast<int64_t>(sz);
+                }
+                it.increment(ec);
+                if (ec) ec.clear();
             }
-            it.increment(ec);
-            if (ec) ec.clear();
-        }
+            postMain([this, targetKey, dirs, files, total]() {
+                if (quickView.loadedPath != targetKey) return;
+                quickView.dirCount = dirs;
+                quickView.fileCount = files;
+                quickView.totalBytes = total;
+            });
+        });
         return;
     }
 
     quickView.isDirectory = false;
-    if (item->isArchive()) {
+    if (isImageExtension(item->name) && mtlDevice != nullptr) {
+        quickView.isImage = true;
         quickView.isBinary = false;
         quickView.hexMode = false;
-        quickView.textContent = ToolsService::listArchiveContentsSync(item->path);
+        quickView.textContent = "Ładowanie obrazu…";
         quickView.hexContent.clear();
+        std::string imgPath = item->path;
+        void* dev = mtlDevice;
+        spawnWorker([this, targetKey, imgPath, dev]() {
+            int w = 0, h = 0;
+            void* tex = platform::loadMetalTexture(imgPath, dev, w, h);
+            postMain([this, targetKey, tex, w, h]() {
+                if (quickView.loadedPath != targetKey) {
+                    if (tex) platform::releaseMetalTexture(tex);
+                    return;
+                }
+                quickView.imageTexture = tex;
+                quickView.imageWidth = w;
+                quickView.imageHeight = h;
+                if (!tex) {
+                    quickView.isImage = false;
+                    quickView.textContent = "(Nie udało się wczytać obrazu)";
+                } else {
+                    quickView.textContent.clear();
+                }
+            });
+        });
         return;
     }
 
-    std::ifstream in(item->path, std::ios::binary);
-    if (!in) {
-        quickView.textContent = "(Brak dostępu lub nie można odczytać pliku)";
-        quickView.hexContent.clear();
-        return;
-    }
+    std::string filePath = item->path;
+    bool isArch = item->isArchive();
+    quickView.textContent = "Ładowanie podglądu…";
+    quickView.hexContent.clear();
+    spawnWorker([this, targetKey, filePath, isArch]() {
+        if (isArch) {
+            std::string listing = ToolsService::listArchiveContentsSync(filePath);
+            postMain([this, targetKey, listing = std::move(listing)]() mutable {
+                if (quickView.loadedPath != targetKey) return;
+                quickView.isBinary = false;
+                quickView.hexMode = false;
+                quickView.textContent = std::move(listing);
+                quickView.hexContent.clear();
+            });
+            return;
+        }
 
-    constexpr size_t maxBytes = 65536;
-    std::vector<uint8_t> buf(maxBytes);
-    in.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(maxBytes));
-    buf.resize(static_cast<size_t>(in.gcount()));
+        std::ifstream in(filePath, std::ios::binary);
+        if (!in) {
+            postMain([this, targetKey]() {
+                if (quickView.loadedPath != targetKey) return;
+                quickView.textContent = "(Brak dostępu lub nie można odczytać pliku)";
+                quickView.hexContent.clear();
+            });
+            return;
+        }
 
-    quickView.hexContent = ToolsService::formatHexDump(buf, 16384);
-    bool bin = false;
-    size_t check = std::min<size_t>(buf.size(), 2048);
-    for (size_t i = 0; i < check; ++i) {
-        if (buf[i] == 0) { bin = true; break; }
-    }
-    quickView.isBinary = bin;
-    if (bin) {
-        quickView.hexMode = true;
-        quickView.textContent = "(Plik binarny — widok HEX)";
-    } else {
-        quickView.textContent.assign(reinterpret_cast<const char*>(buf.data()), buf.size());
-    }
+        constexpr size_t maxBytes = 65536;
+        std::vector<uint8_t> buf(maxBytes);
+        in.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(maxBytes));
+        buf.resize(static_cast<size_t>(in.gcount()));
+
+        std::string hex = ToolsService::formatHexDump(buf, 16384);
+        bool bin = false;
+        size_t check = std::min<size_t>(buf.size(), 2048);
+        for (size_t i = 0; i < check; ++i) {
+            if (buf[i] == 0) { bin = true; break; }
+        }
+        std::string text;
+        if (bin) {
+            text = "(Plik binarny — widok HEX)";
+        } else {
+            text.assign(reinterpret_cast<const char*>(buf.data()), buf.size());
+        }
+
+        postMain([this, targetKey, bin, hex = std::move(hex), text = std::move(text)]() mutable {
+            if (quickView.loadedPath != targetKey) return;
+            quickView.hexContent = std::move(hex);
+            quickView.isBinary = bin;
+            if (bin) quickView.hexMode = true;
+            quickView.textContent = std::move(text);
+        });
+    });
 }
 
 void CommanderEngine::refreshAllVisibleTabs() {
@@ -283,7 +405,7 @@ void CommanderEngine::loadDirectory(
     }
     bool hidden = showHiddenFiles;
 
-    std::thread([this, side, tabID, path, hidden, preserveSelection, selectAfterPath = std::move(selectAfterPath)]() {
+    spawnWorker([this, side, tabID, path, hidden, preserveSelection, selectAfterPath = std::move(selectAfterPath)]() {
         std::string err;
         auto items = FileSystemService::listDirectorySync(path, hidden, err);
         auto freeSpace = FileSystemService::availableCapacity(path);
@@ -312,7 +434,7 @@ void CommanderEngine::loadDirectory(
                 }
             }
         });
-    }).detach();
+    });
 }
 
 void CommanderEngine::navigate(const std::string& path, std::optional<PaneSide> side, bool recordHistory) {
@@ -342,6 +464,23 @@ void CommanderEngine::goUp(std::optional<PaneSide> side) {
     PaneSide targetSide = side.value_or(activeSide);
     auto& tab = pane(targetSide).activeTab();
     if (!tab.canGoUp()) return;
+
+    if (tab.isInsideArchive()) {
+        activeSide = targetSide;
+        if (tab.archiveSubdir.empty()) {
+            std::string prevArchive = tab.archivePath;
+            tab.archivePath.clear();
+            tab.archiveSubdir.clear();
+            tab.filterText.clear();
+            loadDirectory(targetSide, tab.id, tab.currentPath, false, prevArchive);
+        } else {
+            auto slash = tab.archiveSubdir.rfind('/');
+            std::string parentSubdir = (slash == std::string::npos) ? "" : tab.archiveSubdir.substr(0, slash);
+            tab.filterText.clear();
+            loadArchiveDirectory(targetSide, tab.id, tab.archivePath, parentSubdir);
+        }
+        return;
+    }
 
     std::string previousPath = tab.currentPath;
     std::string parentPath = fs::path(previousPath).parent_path().string();
@@ -387,15 +526,61 @@ void CommanderEngine::goToRoot(std::optional<PaneSide> side) {
     navigate("/", side);
 }
 
+void CommanderEngine::loadArchiveDirectory(PaneSide side, uint64_t tabID, const std::string& archivePath, const std::string& archiveSubdir, const std::string& password) {
+    for (auto& t : pane(side).tabs) {
+        if (t.id == tabID) {
+            t.isLoading = true;
+            t.errorMessage.clear();
+            break;
+        }
+    }
+    spawnWorker([this, side, tabID, archivePath, archiveSubdir, password]() {
+        std::string err;
+        auto items = ToolsService::listArchiveEntriesSync(archivePath, archiveSubdir, password, err);
+        postMain([this, side, tabID, archivePath, archiveSubdir, items = std::move(items), err = std::move(err)]() mutable {
+            for (auto& t : pane(side).tabs) {
+                if (t.id == tabID) {
+                    t.isLoading = false;
+                    if (!err.empty()) {
+                        t.errorMessage = err;
+                        showToast(err);
+                    } else {
+                        t.archivePath = archivePath;
+                        t.archiveSubdir = archiveSubdir;
+                        t.items = std::move(items);
+                        t.selectedPaths.clear();
+                        t.recomputeDisplayedItems();
+                        t.cursorPath = t.displayedItems.empty() ? "" : t.displayedItems.front().path;
+                    }
+                    break;
+                }
+            }
+        });
+    });
+}
+
 void CommanderEngine::openItem(const FileItem& item, std::optional<PaneSide> side) {
     PaneSide targetSide = side.value_or(activeSide);
+    auto& tab = pane(targetSide).activeTab();
     if (item.isParentEntry) {
         goUp(targetSide);
-    } else if (item.isNavigableDirectory()) {
+        return;
+    }
+    if (tab.isInsideArchive()) {
+        if (item.isNavigableDirectory()) {
+            std::string nextSubdir = tab.archiveSubdir.empty() ? item.name : (tab.archiveSubdir + "/" + item.name);
+            activeSide = targetSide;
+            loadArchiveDirectory(targetSide, tab.id, tab.archivePath, nextSubdir);
+        } else {
+            showToast("Użyj F5 aby rozpakować plik z archiwum");
+        }
+        return;
+    }
+    if (item.isNavigableDirectory()) {
         navigate(item.path, targetSide);
     } else if (item.isArchive()) {
         activeSide = targetSide;
-        triggerUnpackArchive();
+        loadArchiveDirectory(targetSide, tab.id, item.path, "");
     } else {
         platform::openItem(item.path);
     }
@@ -418,7 +603,7 @@ void CommanderEngine::toggleSpaceSelection(bool advanceCursor, std::optional<Pan
     if (tab.directorySizes.contains(toggled->path)) return;
 
     std::string dirPath = toggled->path;
-    std::thread([this, targetSide, tabID, dirPath]() {
+    spawnWorker([this, targetSide, tabID, dirPath]() {
         int64_t bytes = FileSystemService::calculateDirectorySizeSync(dirPath);
         postMain([this, targetSide, tabID, dirPath, bytes]() {
             for (auto& t : pane(targetSide).tabs) {
@@ -431,7 +616,7 @@ void CommanderEngine::toggleSpaceSelection(bool advanceCursor, std::optional<Pan
                 }
             }
         });
-    }).detach();
+    });
 }
 
 void CommanderEngine::calculateAllDirectorySizes(std::optional<PaneSide> side) {
@@ -447,7 +632,7 @@ void CommanderEngine::calculateAllDirectorySizes(std::optional<PaneSide> side) {
     if (dirs.empty()) return;
     showToast("Obliczanie rozmiaru " + std::to_string(dirs.size()) + " katalogów…");
 
-    std::thread([this, targetSide, tabID, dirs = std::move(dirs)]() {
+    spawnWorker([this, targetSide, tabID, dirs = std::move(dirs)]() {
         for (const auto& d : dirs) {
             int64_t bytes = FileSystemService::calculateDirectorySizeSync(d);
             postMain([this, targetSide, tabID, d, bytes]() {
@@ -465,7 +650,7 @@ void CommanderEngine::calculateAllDirectorySizes(std::optional<PaneSide> side) {
         postMain([this]() {
             showToast("Obliczono rozmiary katalogów");
         });
-    }).detach();
+    });
 }
 
 void CommanderEngine::addTab(std::optional<PaneSide> side, const std::string& path) {
@@ -532,7 +717,7 @@ void CommanderEngine::triggerF3View() {
         std::string dirPath = item->path;
         std::string dirName = item->name;
         showToast("Obliczanie rozmiaru „" + dirName + "”…");
-        std::thread([this, s, tabID, dirPath, dirName]() {
+        spawnWorker([this, s, tabID, dirPath, dirName]() {
             int64_t bytes = FileSystemService::calculateDirectorySizeSync(dirPath);
             postMain([this, s, tabID, dirPath, dirName, bytes]() {
                 for (auto& t : pane(s).tabs) {
@@ -544,7 +729,7 @@ void CommanderEngine::triggerF3View() {
                 }
                 showToast(dirName + ": " + formatByteCount(bytes));
             });
-        }).detach();
+        });
         return;
     }
 
@@ -573,7 +758,8 @@ void CommanderEngine::triggerF4Edit() {
 }
 
 void CommanderEngine::triggerF5Copy() {
-    auto items = activePane().activeTab().selectedItems();
+    auto& tab = activePane().activeTab();
+    auto items = tab.selectedItems();
     if (items.empty()) {
         showToast("Brak wybranych plików do skopiowania");
         return;
@@ -584,9 +770,17 @@ void CommanderEngine::triggerF5Copy() {
     dialog.destinationPath = inactivePane().activeTab().currentPath;
     dialog.isMove = false;
     dialog.conflictPolicy = ConflictResolutionPolicy::Ask;
+    dialog.transferInBackground = false;
+    if (tab.isInsideArchive()) {
+        dialog.fromArchivePath = tab.archivePath;
+    }
 }
 
 void CommanderEngine::triggerF6Move() {
+    if (activePane().activeTab().isInsideArchive()) {
+        showToast("Przenoszenie bezpośrednio z archiwum nie jest obsługiwane — użyj F5");
+        return;
+    }
     auto items = activePane().activeTab().selectedItems();
     if (items.empty()) {
         showToast("Brak wybranych plików do przeniesienia");
@@ -598,6 +792,43 @@ void CommanderEngine::triggerF6Move() {
     dialog.destinationPath = inactivePane().activeTab().currentPath;
     dialog.isMove = true;
     dialog.conflictPolicy = ConflictResolutionPolicy::Ask;
+    dialog.transferInBackground = false;
+}
+
+void CommanderEngine::triggerNewFile() {
+    if (activePane().activeTab().isInsideArchive()) {
+        showToast("Nie można tworzyć plików wewnątrz archiwum");
+        return;
+    }
+    dialog = DialogState{};
+    dialog.kind = DialogKind::CreateFile;
+    dialog.side = activeSide;
+    dialog.parentPath = activePane().activeTab().currentPath;
+    dialog.inputBuffer = "nowy_plik.txt";
+}
+
+void CommanderEngine::createEmptyFileAndEdit(const std::string& name, const std::string& parentPath, PaneSide side) {
+    if (name.empty()) {
+        showToast("Podaj nazwę pliku");
+        return;
+    }
+    std::string targetPath = (fs::path(parentPath) / name).string();
+    std::error_code ec;
+    if (!fs::exists(targetPath, ec)) {
+        std::ofstream out(targetPath, std::ios::binary);
+        if (!out) {
+            errorAlertMessage = "Nie udało się utworzyć pliku: " + targetPath;
+            dialog.kind = DialogKind::None;
+            return;
+        }
+    }
+    dialog.kind = DialogKind::None;
+    refreshPane(side);
+    FileItem item;
+    item.name = name;
+    item.path = targetPath;
+    item.isDirectory = false;
+    openEditor(item);
 }
 
 void CommanderEngine::triggerRename() {
@@ -729,7 +960,7 @@ void CommanderEngine::triggerChecksums() {
     dialog.kind = DialogKind::Checksums;
     dialog.isComputingChecksums = true;
 
-    std::thread([this, filePaths = std::move(filePaths)]() {
+    spawnWorker([this, filePaths = std::move(filePaths)]() {
         auto entries = ToolsService::computeChecksumsSync(filePaths);
         postMain([this, entries = std::move(entries)]() mutable {
             if (dialog.kind == DialogKind::Checksums) {
@@ -737,7 +968,7 @@ void CommanderEngine::triggerChecksums() {
                 dialog.isComputingChecksums = false;
             }
         });
-    }).detach();
+    });
 }
 
 void CommanderEngine::triggerF1Help() {
@@ -750,6 +981,51 @@ void CommanderEngine::triggerF2UserMenu() {
     dialog.kind = DialogKind::UserMenu;
     const FileItem* item = activePane().activeTab().primaryTargetItem();
     if (item) dialog.targetItem = *item;
+    dialog.userMenuItems = ToolsService::loadUserMenu();
+}
+
+void CommanderEngine::executeUserMenuItem(const UserMenuItem& menuItem) {
+    std::string cmd = menuItem.command;
+    if (cmd == "builtin:pack_7z") { triggerPackArchive(); return; }
+    if (cmd == "builtin:unpack_7z") { triggerUnpackArchive(); return; }
+    if (cmd == "builtin:diff") { triggerDiffFiles(); return; }
+    if (cmd == "builtin:symlink") { triggerCreateLink(false, false); return; }
+    if (cmd == "builtin:rel_symlink") { triggerCreateLink(false, true); return; }
+    if (cmd == "builtin:hardlink") { triggerCreateLink(true, false); return; }
+    if (cmd == "builtin:chmod") { triggerChmod(); return; }
+    if (cmd == "builtin:checksums") { triggerChecksums(); return; }
+    if (cmd == "builtin:rename") { triggerRename(); return; }
+
+    auto quote = [](const std::string& s) -> std::string {
+        std::string out = "'";
+        for (char c : s) {
+            if (c == '\'') out += "'\\''";
+            else out.push_back(c);
+        }
+        out.push_back('\'');
+        return out;
+    };
+
+    const FileItem* cur = activePane().activeTab().primaryTargetItem();
+    std::string fileName = cur ? cur->name : "";
+    std::string filePath = cur ? cur->path : "";
+    std::string activeDir = activePane().activeTab().currentPath;
+    std::string oppDir = inactivePane().activeTab().currentPath;
+
+    auto replaceAll = [](std::string& str, const std::string& from, const std::string& to) {
+        size_t pos = 0;
+        while ((pos = str.find(from, pos)) != std::string::npos) {
+            str.replace(pos, from.length(), to);
+            pos += to.length();
+        }
+    };
+    replaceAll(cmd, "%f", quote(fileName));
+    replaceAll(cmd, "%p", quote(filePath));
+    replaceAll(cmd, "%d", quote(activeDir));
+    replaceAll(cmd, "%D", quote(oppDir));
+
+    dialog.kind = DialogKind::None;
+    runQuickCommandInActiveDir(cmd, menuItem.label);
 }
 
 void CommanderEngine::triggerCreateLink(bool hardLink, bool relativeSymlink) {
@@ -808,7 +1084,15 @@ void CommanderEngine::triggerDiffFiles() {
     dialog.kind = DialogKind::DiffViewer;
     dialog.diffLeftPath = lPath;
     dialog.diffRightPath = rPath;
-    dialog.diffOutput = ToolsService::diffFilesSync(lPath, rPath);
+    dialog.diffOutput = "Porównywanie plików…";
+    spawnWorker([this, lPath, rPath]() {
+        std::string out = ToolsService::diffFilesSync(lPath, rPath);
+        postMain([this, lPath, rPath, out = std::move(out)]() mutable {
+            if (dialog.kind == DialogKind::DiffViewer && dialog.diffLeftPath == lPath && dialog.diffRightPath == rPath) {
+                dialog.diffOutput = std::move(out);
+            }
+        });
+    });
 }
 
 // MARK: - File Operations
@@ -860,14 +1144,14 @@ void CommanderEngine::runQuickCommandInActiveDir(const std::string& cmd, const s
     isCommandOutputVisible = true;
     showToast(title);
 
-    std::thread([this, cmd, cwd]() {
+    spawnWorker([this, cmd, cwd]() {
         auto result = ToolsService::runShellCommandSync(cmd, cwd);
         postMain([this, result = std::move(result)]() mutable {
             lastCommandResult = std::move(result);
             isRunningCommand = false;
             refreshAllVisibleTabs();
         });
-    }).detach();
+    });
 }
 
 void CommanderEngine::deleteItems(const std::vector<FileItem>& items, bool permanently, PaneSide side) {
@@ -878,7 +1162,7 @@ void CommanderEngine::deleteItems(const std::vector<FileItem>& items, bool perma
     }
     dialog.kind = DialogKind::None;
 
-    std::thread([this, paths = std::move(paths), permanently, side]() {
+    spawnWorker([this, paths = std::move(paths), permanently, side]() {
         std::string err;
         bool ok = permanently
             ? FileSystemService::permanentlyDeleteSync(paths, err)
@@ -894,28 +1178,39 @@ void CommanderEngine::deleteItems(const std::vector<FileItem>& items, bool perma
                 errorAlertMessage = err;
             }
         });
-    }).detach();
+    });
 }
 
 void CommanderEngine::startTransfer(
     const std::vector<std::string>& sourcePaths,
     const std::string& destDir,
     bool isMove,
-    ConflictResolutionPolicy policy
+    ConflictResolutionPolicy policy,
+    bool inBackground
 ) {
     if (transferCancelFlag_) transferCancelFlag_->store(true);
     transferCancelFlag_ = std::make_shared<std::atomic<bool>>(false);
     auto cancel = transferCancelFlag_;
 
     dialog.kind = DialogKind::None;
-    operationProgress = FileOperationProgress{isMove ? "Przenoszenie…" : "Kopiowanie…", "", 0, static_cast<int>(sourcePaths.size())};
+    operationProgress = FileOperationProgress{
+        isMove ? "Przenoszenie…" : "Kopiowanie…",
+        "",
+        0,
+        static_cast<int>(sourcePaths.size()),
+        0,
+        0,
+        inBackground
+    };
 
-    std::thread([this, sourcePaths, destDir, isMove, policy, cancel]() {
+    spawnWorker([this, sourcePaths, destDir, isMove, policy, inBackground, cancel]() {
         auto outcome = FileSystemService::transferItemsSync(
             sourcePaths, destDir, isMove, policy, *cancel,
-            [this](const FileOperationProgress& prog) {
-                postMain([this, prog]() {
+            [this, inBackground](const FileOperationProgress& prog) {
+                postMain([this, prog, inBackground]() {
+                    bool bg = operationProgress.has_value() ? operationProgress->inBackground : inBackground;
                     operationProgress = prog;
+                    operationProgress->inBackground = bg;
                 });
             }
         );
@@ -947,7 +1242,43 @@ void CommanderEngine::startTransfer(
                     break;
             }
         });
-    }).detach();
+    });
+}
+
+void CommanderEngine::moveTransferToBackground() {
+    if (operationProgress.has_value()) {
+        operationProgress->inBackground = true;
+        showToast("Operacja przeniesiona do tła");
+    }
+}
+
+void CommanderEngine::startArchiveExtract(const std::string& archivePath, const std::vector<std::string>& internalPaths, const std::string& destDir, bool inBackground) {
+    dialog.kind = DialogKind::None;
+    operationProgress = FileOperationProgress{"Rozpakowywanie archiwum…", fs::path(archivePath).filename().string(), 0, static_cast<int>(internalPaths.size()), 0, 0, inBackground};
+    spawnWorker([this, archivePath, internalPaths, destDir]() {
+        std::string err;
+        bool ok = ToolsService::extractArchiveEntriesSync(archivePath, internalPaths, destDir, "", err);
+        postMain([this, ok, err = std::move(err), cnt = internalPaths.size()]() {
+            operationProgress.reset();
+            if (ok) {
+                showToast("Rozpakowano " + std::to_string(cnt) + " el.");
+                refreshAllVisibleTabs();
+            } else {
+                errorAlertMessage = err.empty() ? "Błąd podczas rozpakowywania z archiwum" : err;
+            }
+        });
+    });
+}
+
+void CommanderEngine::handleDroppedFiles(const std::vector<std::string>& paths, PaneSide targetSide, bool isMove) {
+    if (paths.empty()) return;
+    activeSide = targetSide;
+    auto& tab = pane(targetSide).activeTab();
+    if (tab.isInsideArchive()) {
+        showToast("Nie można upuszczać plików bezpośrednio do archiwum");
+        return;
+    }
+    startTransfer(paths, tab.currentPath, isMove, ConflictResolutionPolicy::Ask, false);
 }
 
 void CommanderEngine::resolveConflict(ConflictResolutionPolicy policy) {
@@ -1010,7 +1341,7 @@ void CommanderEngine::executeSyncDirs() {
     auto rows = dialog.syncRows;
     dialog.kind = DialogKind::None;
 
-    std::thread([this, leftDir, rightDir, rows = std::move(rows)]() {
+    spawnWorker([this, leftDir, rightDir, rows = std::move(rows)]() {
         int copied = 0;
         std::error_code ec;
         for (const auto& row : rows) {
@@ -1029,7 +1360,7 @@ void CommanderEngine::executeSyncDirs() {
             showToast("Zsynchronizowano " + std::to_string(copied) + " plików");
             refreshAllVisibleTabs();
         });
-    }).detach();
+    });
 }
 
 void CommanderEngine::executePackArchive() {
@@ -1047,7 +1378,7 @@ void CommanderEngine::executePackArchive() {
     dialog.kind = DialogKind::None;
     showToast("Pakowanie archiwum…");
 
-    std::thread([this, sources = std::move(sources), outPath, cfg]() {
+    spawnWorker([this, sources = std::move(sources), outPath, cfg]() {
         std::string err;
         bool ok = ToolsService::packArchiveSync(sources, outPath, cfg, err);
         postMain([this, ok, err, outPath]() {
@@ -1058,7 +1389,7 @@ void CommanderEngine::executePackArchive() {
                 errorAlertMessage = err;
             }
         });
-    }).detach();
+    });
 }
 
 void CommanderEngine::executeUnpackArchive() {
@@ -1069,7 +1400,7 @@ void CommanderEngine::executeUnpackArchive() {
     dialog.kind = DialogKind::None;
     showToast("Rozpakowywanie archiwum…");
 
-    std::thread([this, archPath, destDir, pwd, targetCopy]() {
+    spawnWorker([this, archPath, destDir, pwd, targetCopy]() {
         std::string err;
         bool ok = ToolsService::unpackArchiveSync(archPath, destDir, pwd, err);
         postMain([this, ok, err, destDir, targetCopy]() {
@@ -1085,7 +1416,7 @@ void CommanderEngine::executeUnpackArchive() {
                 errorAlertMessage = err;
             }
         });
-    }).detach();
+    });
 }
 
 void CommanderEngine::executeChmod() {
@@ -1118,7 +1449,7 @@ void CommanderEngine::startSearch() {
     std::string content = dialog.searchContent;
     bool hidden = dialog.searchIncludeHidden;
 
-    std::thread([this, root, pattern, content, hidden, cancel]() {
+    spawnWorker([this, root, pattern, content, hidden, cancel]() {
         ToolsService::searchFilesSync(root, pattern, content, hidden, *cancel, [this, cancel](SearchResultItem item) {
             if (cancel->load(std::memory_order_relaxed)) return;
             postMain([this, item = std::move(item), cancel]() mutable {
@@ -1132,7 +1463,7 @@ void CommanderEngine::startSearch() {
                 dialog.isSearching = false;
             }
         });
-    }).detach();
+    });
 }
 
 void CommanderEngine::stopSearch() {
@@ -1159,6 +1490,10 @@ void CommanderEngine::navigateToSearchResult(const SearchResultItem& result) {
 }
 
 void CommanderEngine::openViewer(const FileItem& item) {
+    if (dialog.viewerImageTexture) {
+        platform::releaseMetalTexture(dialog.viewerImageTexture);
+        dialog.viewerImageTexture = nullptr;
+    }
     dialog = DialogState{};
     dialog.kind = DialogKind::Viewer;
     dialog.targetItem = item;
@@ -1168,6 +1503,18 @@ void CommanderEngine::openViewer(const FileItem& item) {
         dialog.viewerText = ToolsService::listArchiveContentsSync(item.path);
         dialog.viewerHexText = dialog.viewerText;
         return;
+    }
+
+    if (isImageExtension(item.name) && mtlDevice != nullptr) {
+        int w = 0, h = 0;
+        void* tex = platform::loadMetalTexture(item.path, mtlDevice, w, h);
+        if (tex) {
+            dialog.viewerIsImage = true;
+            dialog.viewerImageTexture = tex;
+            dialog.viewerImageWidth = w;
+            dialog.viewerImageHeight = h;
+            return;
+        }
     }
 
     std::ifstream in(item.path, std::ios::binary);
@@ -1270,14 +1617,14 @@ void CommanderEngine::runCommandInput() {
     isRunningCommand = true;
     isCommandOutputVisible = true;
 
-    std::thread([this, cmd, cwd]() {
+    spawnWorker([this, cmd, cwd]() {
         auto result = ToolsService::runShellCommandSync(cmd, cwd);
         postMain([this, result = std::move(result)]() mutable {
             lastCommandResult = std::move(result);
             isRunningCommand = false;
             refreshAllVisibleTabs();
         });
-    }).detach();
+    });
 }
 
 void CommanderEngine::loadFavorites() {

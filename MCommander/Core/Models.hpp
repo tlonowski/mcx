@@ -109,11 +109,24 @@ struct FileOperationProgress {
     std::string currentItemName;
     int completedCount = 0;
     int totalCount = 0;
+    int64_t currentBytes = 0;
+    int64_t totalBytes = 0;
+    bool inBackground = false;
 
     float fraction() const {
+        if (totalBytes > 0) {
+            return std::min(1.0f, static_cast<float>(currentBytes) / static_cast<float>(totalBytes));
+        }
         if (totalCount <= 0) return 0.0f;
         return static_cast<float>(completedCount) / static_cast<float>(totalCount);
     }
+};
+
+struct UserMenuItem {
+    std::string key;
+    std::string label;
+    std::string command;
+    bool runInSubshell = false;
 };
 
 struct SearchResultItem {

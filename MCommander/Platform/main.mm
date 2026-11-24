@@ -11,6 +11,58 @@
 #include "../Vendor/imgui/imgui.h"
 
 #include <memory>
+#include <string>
+#include <vector>
+
+@interface MCommanderMTKView : MTKView <NSDraggingDestination>
+@property(nonatomic, assign) mc::CommanderEngine *engine;
+@end
+
+@implementation MCommanderMTKView
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
+  NSPasteboard *pb = [sender draggingPasteboard];
+  if ([pb canReadObjectForClasses:@[ [NSURL class] ]
+                          options:@{
+                            NSPasteboardURLReadingFileURLsOnlyKey : @YES
+                          }]) {
+    return NSDragOperationCopy;
+  }
+  return NSDragOperationNone;
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+  if (!_engine)
+    return NO;
+  NSPasteboard *pb = [sender draggingPasteboard];
+  NSArray<NSURL *> *urls =
+      [pb readObjectsForClasses:@[ [NSURL class] ]
+                        options:@{
+                          NSPasteboardURLReadingFileURLsOnlyKey : @YES
+                        }];
+  if (urls.count == 0)
+    return NO;
+
+  std::vector<std::string> paths;
+  paths.reserve(urls.count);
+  for (NSURL *url in urls) {
+    if (url.fileURL && url.path.length > 0) {
+      paths.emplace_back(url.path.UTF8String);
+    }
+  }
+  if (paths.empty())
+    return NO;
+
+  NSPoint loc = [self convertPoint:[sender draggingLocation] fromView:nil];
+  mc::PaneSide side = (loc.x < self.bounds.size.width * 0.5)
+                          ? mc::PaneSide::Left
+                          : mc::PaneSide::Right;
+  bool isMove = (([NSEvent modifierFlags] & NSEventModifierFlagOption) != 0);
+  _engine->handleDroppedFiles(paths, side, isMove);
+  return YES;
+}
+
+@end
 
 @interface MCommanderViewController : NSViewController <MTKViewDelegate>
 @property(nonatomic, readonly) MTKView *mtkView;
@@ -29,12 +81,14 @@
 
 - (void)loadView {
   self.device = MTLCreateSystemDefaultDevice();
-  MTKView *view = [[MTKView alloc] initWithFrame:NSMakeRect(0, 0, 1340, 840)
-                                          device:self.device];
+  MCommanderMTKView *view =
+      [[MCommanderMTKView alloc] initWithFrame:NSMakeRect(0, 0, 1340, 840)
+                                        device:self.device];
   view.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
   view.clearColor = MTLClearColorMake(0.153, 0.157, 0.133, 1.0);
   view.preferredFramesPerSecond = 60;
   view.delegate = self;
+  [view registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
   self.view = view;
 }
 
@@ -54,10 +108,15 @@
   ImGui_ImplOSX_Init(self.view);
 
   _engine = std::make_unique<mc::CommanderEngine>();
+  _engine->mtlDevice = (__bridge void *)self.device;
+  ((MCommanderMTKView *)self.view).engine = _engine.get();
   _ui = std::make_unique<mc::ui::CommanderUI>(*_engine, fonts);
 }
 
 - (void)dealloc {
+  if ([self.view isKindOfClass:[MCommanderMTKView class]]) {
+    ((MCommanderMTKView *)self.view).engine = nullptr;
+  }
   _ui.reset();
   _engine.reset();
   ImGui_ImplMetal_Shutdown();

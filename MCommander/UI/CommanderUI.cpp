@@ -146,7 +146,7 @@ void drawRowPrefixIcon(const FileItem &item, ImVec2 p) {
                   IM_COL32(54, 128, 102, 235), 1.4f);
       dl->AddLine(ImVec2(x + 4.5f, y + 11), ImVec2(x + 10.0f, y + 11),
                   IM_COL32(94, 88, 156, 235), 1.4f);
-    } else {
+  } else {
       ImU32 lineCol = IM_COL32(68, 78, 92, 210);
       dl->AddLine(ImVec2(x + 4.5f, y + 7), ImVec2(x + 11, y + 7), lineCol,
                   1.2f);
@@ -235,7 +235,7 @@ void CommanderUI::render() {
     } else if (engine_.activeSide == PaneSide::Right &&
                engine_.infoPanelActive) {
       renderInfoPane(PaneSide::Left, leftW, paneHeight);
-    } else {
+  } else {
       renderFilePane(engine_.leftPane, leftW, paneHeight);
     }
 
@@ -264,7 +264,7 @@ void CommanderUI::render() {
     } else if (engine_.activeSide == PaneSide::Left &&
                engine_.infoPanelActive) {
       renderInfoPane(PaneSide::Right, rightW, paneHeight);
-    } else {
+  } else {
       renderFilePane(engine_.rightPane, rightW, paneHeight);
     }
 
@@ -510,7 +510,10 @@ void CommanderUI::handleGlobalShortcuts() {
     return;
   }
   if (ImGui::IsKeyPressed(ImGuiKey_F4)) {
-    engine_.triggerF4Edit();
+    if (shift)
+      engine_.triggerNewFile();
+    else
+      engine_.triggerF4Edit();
     return;
   }
   if (ImGui::IsKeyPressed(ImGuiKey_F5)) {
@@ -1058,7 +1061,11 @@ void CommanderUI::renderFilePane(PaneState &pane, float width, float height) {
     float filterW = 130.0f;
     float pathBtnW = std::max(60.0f, width - filterW - 18.0f);
 
-    std::string maskDisplay = tab.currentPath;
+    std::string maskDisplay =
+        tab.isInsideArchive()
+            ? (tab.archivePath +
+               (tab.archiveSubdir.empty() ? "" : ("/" + tab.archiveSubdir)))
+            : tab.currentPath;
     if (!maskDisplay.empty() && maskDisplay.back() != '/')
       maskDisplay += "/";
     maskDisplay +=
@@ -1258,7 +1265,7 @@ void CommanderUI::renderFilePane(PaneState &pane, float width, float height) {
               tab.toggleSelection(item.path);
             } else if (io.KeyShift) {
               tab.selectRange(item.path);
-            } else {
+  } else {
               if (!tab.selectedPaths.contains(item.path)) {
                 tab.deselectAll();
               }
@@ -1444,7 +1451,7 @@ void CommanderUI::renderFilePane(PaneState &pane, float width, float height) {
                          formatByteCount(st.totalBytes).c_str(),
                          st.selectedFiles, st.totalFiles, st.selectedDirs,
                          st.totalDirs);
-    } else {
+  } else {
       ImGui::TextColored(isActive ? AntigravityColors::textSecondary
                                   : AntigravityColors::textMuted,
                          "%s w %zu plik(ach), %zu kat.",
@@ -1512,6 +1519,26 @@ void CommanderUI::renderQuickViewPane(PaneSide side, float width,
     ImGui::Text("Ostatnia modyfikacja     : %s", item->formattedDate().c_str());
     if (fonts_.mono)
       ImGui::PopFont();
+  } else if (engine_.quickView.isImage &&
+             engine_.quickView.imageTexture != nullptr) {
+    ImGui::BeginChild("##QVImageScroll", ImVec2(0, 0));
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    float iw = static_cast<float>(std::max(1, engine_.quickView.imageWidth));
+    float ih = static_cast<float>(std::max(1, engine_.quickView.imageHeight));
+    float maxH = std::max(40.0f, avail.y - 24.0f);
+    float maxW = std::max(40.0f, avail.x - 8.0f);
+    float scale = std::min(1.0f, std::min(maxW / iw, maxH / ih));
+    float dw = iw * scale;
+    float dh = ih * scale;
+    if (dw < avail.x) {
+      ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (avail.x - dw) * 0.5f);
+    }
+    ImGui::Image((ImTextureID)(intptr_t)engine_.quickView.imageTexture,
+                 ImVec2(dw, dh));
+    ImGui::TextColored(AntigravityColors::textMuted, "%d x %d px",
+                       engine_.quickView.imageWidth,
+                       engine_.quickView.imageHeight);
+    ImGui::EndChild();
   } else {
     if (fonts_.mono)
       ImGui::PushFont(fonts_.mono);
@@ -1752,10 +1779,9 @@ void CommanderUI::renderCommandBar() {
     ImGui::SetKeyboardFocusHere();
     focusCommandNextFrame_ = false;
   }
-  bool enter = ImGui::InputTextWithHint(
-      "##TCCmdInput",
-      tr("cmd.hint"),
-      &engine_.commandInput, ImGuiInputTextFlags_EnterReturnsTrue);
+  bool enter = ImGui::InputTextWithHint("##TCCmdInput", tr("cmd.hint"),
+                                        &engine_.commandInput,
+                                        ImGuiInputTextFlags_EnterReturnsTrue);
   if (fonts_.mono)
     ImGui::PopFont();
 
@@ -1784,9 +1810,9 @@ void CommanderUI::renderFunctionKeyBar() {
     int actionID;
   };
   static const FKeyCell cells[10] = {
-      {"F1", "fkey.1", 1}, {"F2", "fkey.2", 2},   {"F3", "fkey.3", 3},
-      {"F4", "fkey.4", 4}, {"F5", "fkey.5", 5},   {"F6", "fkey.6", 6},
-      {"F7", "fkey.7", 7}, {"F8", "fkey.8", 8},   {"F9", "fkey.9", 9},
+      {"F1", "fkey.1", 1},   {"F2", "fkey.2", 2}, {"F3", "fkey.3", 3},
+      {"F4", "fkey.4", 4},   {"F5", "fkey.5", 5}, {"F6", "fkey.6", 6},
+      {"F7", "fkey.7", 7},   {"F8", "fkey.8", 8}, {"F9", "fkey.9", 9},
       {"F10", "fkey.10", 10}};
 
   float totalW = ImGui::GetWindowWidth();
@@ -1883,7 +1909,7 @@ void CommanderUI::renderHotlistAndHistoryPopups() {
     if (tab.historyBack.empty() && tab.historyForward.empty()) {
       ImGui::TextColored(AntigravityColors::textMuted,
                          "(Brak historii w tej karcie)");
-    } else {
+  } else {
       for (auto it = tab.historyBack.rbegin(); it != tab.historyBack.rend();
            ++it) {
         if (ImGui::MenuItem(it->c_str())) {
@@ -1973,40 +1999,92 @@ void CommanderUI::renderDialogs() {
     break;
   }
   case DialogKind::TransferConfirm: {
-    centerNext(480, 0);
-    const char *title = d.isMove ? "Przenieś (F6)" : "Kopiuj (F5)";
+    centerNext(540, 0);
+    bool fromArchive = !d.fromArchivePath.empty();
+    const char *title =
+        fromArchive ? tr("dialog.extract.title")
+                    : (d.isMove ? tr("dialog.move.title")
+                                : tr("dialog.copy.title"));
     ImGui::OpenPopup(title);
     if (ImGui::BeginPopupModal(title, nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
-      ImGui::Text("%s %zu el. do:", d.isMove ? "Przenieś" : "Kopiuj",
-                  d.targetItems.size());
+      ImGui::PushStyleColor(ImGuiCol_Text, AntigravityColors::accent);
+      if (d.targetItems.size() == 1) {
+        ImGui::Text("%s: %s",
+                    fromArchive ? tr("dialog.extract.prompt")
+                                : (d.isMove ? tr("dialog.move.prompt")
+                                            : tr("dialog.copy.prompt")),
+                    d.targetItems.front().name.c_str());
+      } else {
+        ImGui::Text("%s (%zu el.):",
+                    fromArchive ? tr("dialog.extract.prompt")
+                                : (d.isMove ? tr("dialog.move.prompt")
+                                            : tr("dialog.copy.prompt")),
+                    d.targetItems.size());
+      }
+      ImGui::PopStyleColor();
+      ImGui::Spacing();
+      ImGui::TextColored(AntigravityColors::textSecondary, "%s",
+                         tr("dialog.transfer.dest"));
       if (fonts_.mono)
         ImGui::PushFont(fonts_.mono);
-      ImGui::SetNextItemWidth(450);
-      ImGui::InputText("##DestPathInput", &d.destinationPath);
+      ImGui::SetNextItemWidth(510);
+      bool enter = ImGui::InputText("##DestPathInput", &d.destinationPath,
+                                    ImGuiInputTextFlags_EnterReturnsTrue);
       if (fonts_.mono)
         ImGui::PopFont();
-      ImGui::Separator();
-      ImGui::Text("Przy konflikcie nazw:");
-      int pol = static_cast<int>(d.conflictPolicy);
-      ImGui::RadioButton("Zapytaj", &pol, 0);
-      ImGui::SameLine();
-      ImGui::RadioButton("Nadpisz", &pol, 1);
-      ImGui::SameLine();
-      ImGui::RadioButton("Pomiń", &pol, 2);
-      ImGui::SameLine();
-      ImGui::RadioButton("Zachowaj oba", &pol, 3);
-      d.conflictPolicy = static_cast<ConflictResolutionPolicy>(pol);
+
+      if (!fromArchive) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(AntigravityColors::textSecondary, "%s",
+                           tr("dialog.transfer.conflict"));
+        int pol = static_cast<int>(d.conflictPolicy);
+        ImGui::RadioButton(tr("dialog.transfer.ask"), &pol, 0);
+        ImGui::SameLine();
+        ImGui::RadioButton(tr("dialog.transfer.overwrite"), &pol, 1);
+        ImGui::SameLine();
+        ImGui::RadioButton(tr("dialog.transfer.skip"), &pol, 2);
+        ImGui::SameLine();
+        ImGui::RadioButton(tr("dialog.transfer.keep_both"), &pol, 3);
+        d.conflictPolicy = static_cast<ConflictResolutionPolicy>(pol);
+      }
+
       ImGui::Spacing();
-      if (boxButton(d.isMove ? "F6 Przenieś" : "F5 Kopiuj", true)) {
-        std::vector<std::string> paths;
-        for (const auto &it : d.targetItems)
-          paths.push_back(it.path);
-        engine_.startTransfer(paths, d.destinationPath, d.isMove,
-                              d.conflictPolicy);
+      ImGui::Separator();
+      ImGui::Spacing();
+
+      auto runTransfer = [&](bool bg) {
+        if (fromArchive) {
+          std::vector<std::string> internalPaths;
+          for (const auto &it : d.targetItems)
+            internalPaths.push_back(it.path);
+          engine_.startArchiveExtract(d.fromArchivePath, internalPaths,
+                                      d.destinationPath);
+        } else {
+          std::vector<std::string> paths;
+          for (const auto &it : d.targetItems)
+            paths.push_back(it.path);
+          engine_.startTransfer(paths, d.destinationPath, d.isMove,
+                                d.conflictPolicy, bg);
+        }
+      };
+
+      if (enter ||
+          boxButton(fromArchive ? tr("dialog.extract.btn")
+                                : (d.isMove ? tr("dialog.move.btn")
+                                            : tr("dialog.copy.btn")),
+                    true)) {
+        runTransfer(false);
+      }
+      if (!fromArchive) {
+        ImGui::SameLine();
+        if (boxButton(tr("dialog.transfer.background"))) {
+          runTransfer(true);
+        }
       }
       ImGui::SameLine();
-      if (boxButton("Anuluj"))
+      if (boxButton(tr("common.cancel")))
         d.kind = DialogKind::None;
       ImGui::EndPopup();
     }
@@ -2238,7 +2316,7 @@ void CommanderUI::renderDialogs() {
         ImGui::SameLine();
         ImGui::TextColored(AntigravityColors::accent, "Szukanie… (%zu trafień)",
                            d.searchResults.size());
-      } else {
+  } else {
         if (enter || boxButton("Rozpocznij szukanie", true))
           engine_.startSearch();
         ImGui::SameLine();
@@ -2561,7 +2639,7 @@ void CommanderUI::renderDialogs() {
       if (d.isComputingChecksums) {
         ImGui::TextColored(AntigravityColors::accent,
                            "Obliczanie sum kontrolnych…");
-      } else {
+  } else {
         float tH = ImGui::GetContentRegionAvail().y - 36.0f;
         if (ImGui::BeginTable("##ChecksumTable", 3,
                               ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
@@ -2615,27 +2693,52 @@ void CommanderUI::renderDialogs() {
     if (ImGui::BeginPopupModal("Lister (F3)")) {
       ImGui::TextColored(AntigravityColors::accent, "%s",
                          d.targetItem.name.c_str());
-      ImGui::SameLine(0, 16);
-      if (boxButton("1: Tekst", !d.viewerHexMode))
-        d.viewerHexMode = false;
-      ImGui::SameLine();
-      if (boxButton("3: HEX", d.viewerHexMode))
-        d.viewerHexMode = true;
+      if (d.viewerIsImage && d.viewerImageTexture != nullptr) {
+        ImGui::SameLine(0, 16);
+        ImGui::TextColored(AntigravityColors::textMuted, "%d x %d px",
+                           d.viewerImageWidth, d.viewerImageHeight);
+      } else {
+        ImGui::SameLine(0, 16);
+        if (boxButton("1: Tekst", !d.viewerHexMode))
+          d.viewerHexMode = false;
+        ImGui::SameLine();
+        if (boxButton("3: HEX", d.viewerHexMode))
+          d.viewerHexMode = true;
+      }
       ImGui::SameLine(ImGui::GetContentRegionAvail().x - 75.0f);
       if (boxButton("Zamknij"))
         d.kind = DialogKind::None;
       ImGui::Separator();
 
-      if (fonts_.mono)
-        ImGui::PushFont(fonts_.mono);
-      const std::string &content =
-          d.viewerHexMode ? d.viewerHexText : d.viewerText;
-      ImGui::BeginChild("##ViewerScroll", ImVec2(0, 0),
-                        ImGuiChildFlags_Borders);
-      ImGui::TextUnformatted(content.c_str());
-      ImGui::EndChild();
-      if (fonts_.mono)
-        ImGui::PopFont();
+      if (d.viewerIsImage && d.viewerImageTexture != nullptr) {
+        ImGui::BeginChild("##ViewerImageScroll", ImVec2(0, 0),
+                          ImGuiChildFlags_Borders);
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        float iw = static_cast<float>(std::max(1, d.viewerImageWidth));
+        float ih = static_cast<float>(std::max(1, d.viewerImageHeight));
+        float scale =
+            std::min(1.0f, std::min(std::max(40.0f, avail.x - 16.0f) / iw,
+                                    std::max(40.0f, avail.y - 16.0f) / ih));
+        float dw = iw * scale;
+        float dh = ih * scale;
+        ImGui::SetCursorPos(ImVec2(
+            ImGui::GetCursorPosX() + std::max(0.0f, (avail.x - dw) * 0.5f),
+            ImGui::GetCursorPosY() + std::max(0.0f, (avail.y - dh) * 0.5f)));
+        ImGui::Image((ImTextureID)(intptr_t)d.viewerImageTexture,
+                     ImVec2(dw, dh));
+        ImGui::EndChild();
+      } else {
+        if (fonts_.mono)
+          ImGui::PushFont(fonts_.mono);
+        const std::string &content =
+            d.viewerHexMode ? d.viewerHexText : d.viewerText;
+        ImGui::BeginChild("##ViewerScroll", ImVec2(0, 0),
+                          ImGuiChildFlags_Borders);
+        ImGui::TextUnformatted(content.c_str());
+        ImGui::EndChild();
+        if (fonts_.mono)
+          ImGui::PopFont();
+      }
       ImGui::EndPopup();
     }
     break;
@@ -2740,7 +2843,7 @@ void CommanderUI::renderDialogs() {
     break;
   }
   case DialogKind::UserMenu: {
-    centerNext(520, 0);
+    centerNext(540, 0);
     ImGui::OpenPopup("Menu Użytkownika Midnight Commander (F2)");
     if (ImGui::BeginPopupModal("Menu Użytkownika Midnight Commander (F2)",
                                nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -2748,49 +2851,20 @@ void CommanderUI::renderDialogs() {
           AntigravityColors::accent,
           "Wybierz operację dla bieżącego zaznaczenia / katalogu:");
       ImGui::Separator();
-      ImVec2 bSize(490.0f, 26.0f);
-      if (boxButton(
-              "1. Spakuj zaznaczone do archiwum .7z (z szyfrowaniem AES-256)",
-              false, AntigravityColors::accent, bSize)) {
-        engine_.triggerPackArchive();
+      ImVec2 bSize(510.0f, 26.0f);
+      for (int i = 0; i < static_cast<int>(d.userMenuItems.size()); ++i) {
+        const auto &item = d.userMenuItems[static_cast<size_t>(i)];
+        std::string label =
+            (item.key.empty() ? "" : (item.key + ". ")) + item.label;
+        ImGui::PushID(i);
+        if (boxButton(label.c_str(), false, AntigravityColors::accent, bSize)) {
+          engine_.executeUserMenuItem(item);
+        }
+        ImGui::PopID();
       }
-      if (boxButton("2. Rozpakuj archiwum spod kursora do drugiego panelu",
-                    false, AntigravityColors::accent, bSize)) {
-        engine_.triggerUnpackArchive();
-      }
-      if (boxButton("3. Porównaj dwa pliki: lewy vs prawy panel (diff -u)",
-                    false, AntigravityColors::accent, bSize)) {
-        engine_.triggerDiffFiles();
-      }
-      if (boxButton(
-              "4. Utwórz dowiązanie symboliczne (Symlink) w drugim panelu",
-              false, AntigravityColors::accent, bSize)) {
-        engine_.triggerCreateLink(false, false);
-      }
-      if (boxButton("5. Utwórz względny Symlink w drugim panelu", false,
-                    AntigravityColors::accent, bSize)) {
-        engine_.triggerCreateLink(false, true);
-      }
-      if (boxButton("6. Utwórz dowiązanie twarde (Hardlink) w drugim panelu",
-                    false, AntigravityColors::accent, bSize)) {
-        engine_.triggerCreateLink(true, false);
-      }
-      if (boxButton("7. Zmień uprawnienia POSIX (chmod)", false,
-                    AntigravityColors::accent, bSize)) {
-        engine_.triggerChmod();
-      }
-      if (boxButton("8. Oblicz sumy kontrolne SHA-256 / MD5", false,
-                    AntigravityColors::accent, bSize)) {
-        engine_.triggerChecksums();
-      }
-      if (boxButton("9. Wykonaj 'git status' w aktywnym katalogu", false,
-                    AntigravityColors::accent, bSize)) {
-        engine_.runQuickCommandInActiveDir("git status", "git status");
-      }
-      if (boxButton("0. Zmień nazwę pliku / katalogu spod kursora", false,
-                    AntigravityColors::accent, bSize)) {
-        engine_.triggerRename();
-      }
+      ImGui::Spacing();
+      ImGui::TextColored(AntigravityColors::textMuted,
+                         "Konfiguracja: ~/.config/mcx/menu.json");
       ImGui::Spacing();
       if (boxButton("Anuluj (Esc)"))
         d.kind = DialogKind::None;
@@ -2864,6 +2938,30 @@ void CommanderUI::renderDialogs() {
     }
     break;
   }
+  case DialogKind::CreateFile: {
+    centerNext(460, 0);
+    ImGui::OpenPopup(tr("dialog.create_file.title"));
+    if (ImGui::BeginPopupModal(tr("dialog.create_file.title"), nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+      ImGui::Text("%s", tr("dialog.create_file.prompt"));
+      if (fonts_.mono)
+        ImGui::PushFont(fonts_.mono);
+      ImGui::SetNextItemWidth(430);
+      bool enter = ImGui::InputText("##CreateFileName", &d.inputBuffer,
+                                    ImGuiInputTextFlags_EnterReturnsTrue);
+      if (fonts_.mono)
+        ImGui::PopFont();
+      ImGui::Spacing();
+      if (enter || boxButton(tr("dialog.create_file.btn"), true)) {
+        engine_.createEmptyFileAndEdit(d.inputBuffer, d.parentPath, d.side);
+      }
+      ImGui::SameLine();
+      if (boxButton(tr("common.cancel")))
+        d.kind = DialogKind::None;
+      ImGui::EndPopup();
+    }
+    break;
+  }
   case DialogKind::None:
     break;
   }
@@ -2876,26 +2974,66 @@ void CommanderUI::renderToastAndProgress() {
 
   if (engine_.operationProgress.has_value()) {
     const auto &prog = *engine_.operationProgress;
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f,
-                                   vp->WorkPos.y + vp->WorkSize.y - 96.0f),
-                            ImGuiCond_Always, ImVec2(0.5f, 1.0f));
-    ImGui::SetNextWindowSize(ImVec2(420, 0));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 8.0f));
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, AntigravityColors::bgHeader);
-    ImGui::PushStyleColor(ImGuiCol_Border, AntigravityColors::accent);
-    ImGui::Begin("##ProgressOverlay", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                     ImGuiWindowFlags_NoSavedSettings |
-                     ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::Text("%s (%d/%d)  %s", prog.title.c_str(), prog.completedCount,
-                prog.totalCount, prog.currentItemName.c_str());
-    ImGui::ProgressBar(prog.fraction(), ImVec2(320, 10));
-    ImGui::SameLine();
-    if (boxButton("Anuluj"))
-      engine_.cancelActiveTransfer();
-    ImGui::End();
-    ImGui::PopStyleColor(2);
-    ImGui::PopStyleVar();
+    if (prog.inBackground) {
+      ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f,
+                                     vp->WorkPos.y + vp->WorkSize.y - 44.0f),
+                              ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+      ImGui::SetNextWindowSize(ImVec2(520, 0));
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 6.0f));
+      ImGui::PushStyleColor(ImGuiCol_WindowBg, AntigravityColors::bgHeader);
+      ImGui::PushStyleColor(ImGuiCol_Border, AntigravityColors::accent);
+      ImGui::Begin("##ProgressBgOverlay", nullptr,
+                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                       ImGuiWindowFlags_NoSavedSettings |
+                       ImGuiWindowFlags_AlwaysAutoResize);
+      ImGui::TextColored(AntigravityColors::accent, "[%s]",
+                         tr("dialog.transfer.in_background"));
+      ImGui::SameLine();
+      ImGui::Text("%s (%d/%d) %s", prog.title.c_str(), prog.completedCount,
+                  prog.totalCount, prog.currentItemName.c_str());
+      ImGui::ProgressBar(prog.fraction(), ImVec2(410, 8));
+      ImGui::SameLine();
+      if (boxButton(tr("common.cancel")))
+        engine_.cancelActiveTransfer();
+      ImGui::End();
+      ImGui::PopStyleColor(2);
+      ImGui::PopStyleVar();
+    } else {
+      ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f,
+                                     vp->WorkPos.y + vp->WorkSize.y * 0.5f),
+                              ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+      ImGui::SetNextWindowSize(ImVec2(500, 0));
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f, 12.0f));
+      ImGui::PushStyleColor(ImGuiCol_WindowBg, AntigravityColors::bgPanel);
+      ImGui::PushStyleColor(ImGuiCol_Border, AntigravityColors::accent);
+      ImGui::Begin("##ProgressModalOverlay", nullptr,
+                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                       ImGuiWindowFlags_NoSavedSettings |
+                       ImGuiWindowFlags_AlwaysAutoResize);
+      ImGui::TextColored(AntigravityColors::accent, "%s (%d/%d)",
+                         prog.title.c_str(), prog.completedCount,
+                         prog.totalCount);
+      ImGui::Separator();
+      ImGui::TextWrapped("%s", prog.currentItemName.empty()
+                                   ? "..."
+                                   : prog.currentItemName.c_str());
+      ImGui::Spacing();
+      ImGui::ProgressBar(prog.fraction(), ImVec2(470, 14));
+      if (prog.totalBytes > 0) {
+        ImGui::TextColored(AntigravityColors::textSecondary, "%s / %s",
+                           formatByteCount(prog.currentBytes).c_str(),
+                           formatByteCount(prog.totalBytes).c_str());
+      }
+      ImGui::Spacing();
+      if (boxButton(tr("dialog.transfer.background"), true))
+        engine_.moveTransferToBackground();
+      ImGui::SameLine();
+      if (boxButton(tr("common.cancel")))
+        engine_.cancelActiveTransfer();
+      ImGui::End();
+      ImGui::PopStyleColor(2);
+      ImGui::PopStyleVar();
+    }
   }
 
   if (!engine_.toastMessage.empty()) {

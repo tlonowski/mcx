@@ -1,4 +1,5 @@
 #include "ToolsService.hpp"
+#include "../Platform/MacBridge.hpp"
 
 #include <CommonCrypto/CommonDigest.h>
 #include <algorithm>
@@ -786,6 +787,211 @@ std::string ToolsService::listArchiveContentsSync(
         return res.output;
     }
     return "(Zainstaluj 7zz aby podglądać zawartość archiwum)";
+}
+
+std::vector<FileItem> ToolsService::listArchiveEntriesSync(
+    const std::string& archivePath,
+    const std::string& archiveSubdir,
+    const std::string& password,
+    std::string& errorOut
+) {
+    std::vector<FileItem> items;
+    std::string bin7z = find7zBinary();
+    if (bin7z.empty()) {
+        errorOut = "Brak 7zz (/opt/homebrew/bin/7zz) do przeglądania archiwum.";
+        return items;
+    }
+
+    std::string cmd = shellQuote(bin7z) + " l -slt -p" + shellQuote(password) + " " + shellQuote(archivePath);
+    auto res = runShellCommandSync(cmd, fs::path(archivePath).parent_path().string());
+    if (res.exitCode != 0) {
+        errorOut = res.output;
+        return items;
+    }
+
+    std::string prefix = archiveSubdir;
+    while (!prefix.empty() && prefix.front() == '/') prefix.erase(prefix.begin());
+    while (!prefix.empty() && prefix.back() == '/') prefix.pop_back();
+    if (!prefix.empty()) prefix.push_back('/');
+
+    std::unordered_set<std::string> seenDirs;
+    std::istringstream iss(res.output);
+    std::string line;
+    bool inEntries = false;
+
+    std::string curPath;
+    int64_t curSize = 0;
+    bool curIsDir = false;
+    std::string curDate;
+
+    auto flushEntry = [&]() {
+        if (curPath.empty()) return;
+        std::string norm = curPath;
+        while (!norm.empty() && norm.back() == '/') norm.pop_back();
+        if (norm.empty()) { curPath.clear(); return; }
+
+        if (!prefix.empty()) {
+            if (norm.rfind(prefix, 0) != 0) { curPath.clear(); return; }
+            norm = norm.substr(prefix.size());
+        }
+        if (norm.empty()) { curPath.clear(); return; }
+
+        size_t slash = norm.find('/');
+        if (slash != std::string::npos) {
+            std::string topDir = norm.substr(0, slash);
+            if (seenDirs.insert(topDir).second) {
+                FileItem d;
+                d.path = prefix + topDir;
+                d.name = topDir;
+                d.displayStem = topDir;
+                d.isDirectory = true;
+                d.posixPermissions = "drwxr-xr-x";
+                d.typeDescription = "Folder (archiwum)";
+                items.push_back(std::move(d));
+            }
+        } else {
+            if (curIsDir) {
+                if (seenDirs.insert(norm).second) {
+                    FileItem d;
+                    d.path = prefix + norm;
+                    d.name = norm;
+                    d.displayStem = norm;
+                    d.isDirectory = true;
+                    d.posixPermissions = "drwxr-xr-x";
+                    d.typeDescription = "Folder (archiwum)";
+                    items.push_back(std::move(d));
+                }
+            } else {
+                FileItem f;
+                f.path = prefix + norm;
+                f.name = norm;
+                fs::path fp(norm);
+                std::string ext = fp.extension().string();
+                if (!ext.empty() && ext.front() == '.') ext.erase(ext.begin());
+                f.fileExtension = ext;
+                f.displayStem = (!ext.empty() && norm != "." + ext)
+                    ? norm.substr(0, norm.size() - ext.size() - 1)
+                    : norm;
+                f.isDirectory = false;
+                f.size = curSize;
+                f.posixPermissions = "-rw-r--r--";
+                f.typeDescription = "Plik w archiwum";
+                items.push_back(std::move(f));
+            }
+        }
+
+        curPath.clear();
+        curSize = 0;
+        curIsDir = false;
+        curDate.clear();
+    };
+
+    while (std::getline(iss, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line == "----------") {
+            inEntries = true;
+            flushEntry();
+            continue;
+        }
+        if (!inEntries) continue;
+        if (line.empty()) {
+            flushEntry();
+            continue;
+        }
+        if (line.rfind("Path = ", 0) == 0) curPath = line.substr(7);
+        else if (line.rfind("Size = ", 0) == 0) {
+            try { curSize = std::stoll(line.substr(7)); } catch (...) { curSize = 0; }
+        }
+        else if (line.rfind("Folder = +", 0) == 0) curIsDir = true;
+        else if (line.rfind("Attributes = D", 0) == 0) curIsDir = true;
+        else if (line.rfind("Modified = ", 0) == 0) curDate = line.substr(11);
+    }
+    flushEntry();
+    return items;
+}
+
+bool ToolsService::extractArchiveEntriesSync(
+    const std::string& archivePath,
+    const std::vector<std::string>& internalPaths,
+    const std::string& destinationDirectory,
+    const std::string& password,
+    std::string& errorOut
+) {
+    std::string bin7z = find7zBinary();
+    if (bin7z.empty()) {
+        errorOut = "Brak 7zz (/opt/homebrew/bin/7zz).";
+        return false;
+    }
+    std::string cmd = shellQuote(bin7z) + " x -y -p" + shellQuote(password) +
+                      " -o" + shellQuote(destinationDirectory) + " " + shellQuote(archivePath);
+    for (const auto& ip : internalPaths) {
+        cmd += " " + shellQuote(ip);
+    }
+    auto res = runShellCommandSync(cmd, destinationDirectory);
+    if (res.exitCode != 0) {
+        errorOut = res.output;
+        return false;
+    }
+    return true;
+}
+
+std::vector<UserMenuItem> ToolsService::loadUserMenu() {
+    std::string cfgDir = platform::homeDirectory() + "/.config/mcx";
+    std::string menuFile = cfgDir + "/menu.json";
+    std::error_code ec;
+
+    if (!fs::exists(menuFile, ec)) {
+        fs::create_directories(cfgDir, ec);
+        std::ofstream out(menuFile);
+        if (out) {
+            out << R"({
+  "1": "Spakuj zaznaczone do .7z (AES-256)|__MCX_PACK__",
+  "2": "Rozpakuj archiwum do 2. panelu|__MCX_UNPACK__",
+  "3": "Porównaj pliki (diff -u)|__MCX_DIFF__",
+  "4": "Utwórz Symlink w 2. panelu|__MCX_SYMLINK__",
+  "5": "Utwórz Hardlink w 2. panelu|__MCX_HARDLINK__",
+  "6": "Zmień uprawnienia POSIX (chmod)|__MCX_CHMOD__",
+  "7": "Oblicz sumy SHA-256 / MD5|__MCX_CHECKSUMS__",
+  "8": "git status|git status",
+  "9": "git log (ostatnie 10)|git log -n 10 --oneline",
+  "0": "Lista plików (ls -la)|ls -la"
+}
+)";
+        }
+    }
+
+    std::unordered_map<std::string, std::string> raw;
+    std::vector<UserMenuItem> items;
+    if (fs::exists(menuFile, ec)) {
+        // Parse flat JSON via simple line-based or reuse Localization parser
+        std::ifstream in(menuFile);
+        std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        // Quick flat key:value extraction
+        size_t pos = 0;
+        while ((pos = content.find('"', pos)) != std::string::npos) {
+            size_t kEnd = content.find('"', pos + 1);
+            if (kEnd == std::string::npos) break;
+            std::string key = content.substr(pos + 1, kEnd - pos - 1);
+            size_t colon = content.find(':', kEnd + 1);
+            if (colon == std::string::npos) break;
+            size_t vStart = content.find('"', colon + 1);
+            if (vStart == std::string::npos) break;
+            size_t vEnd = content.find('"', vStart + 1);
+            if (vEnd == std::string::npos) break;
+            std::string val = content.substr(vStart + 1, vEnd - vStart - 1);
+            pos = vEnd + 1;
+
+            size_t sep = val.find('|');
+            if (sep != std::string::npos) {
+                UserMenuItem u;
+                u.key = key;
+                u.label = val.substr(0, sep);
+                u.command = val.substr(sep + 1);
+                items.push_back(std::move(u));
+            }
+        }
+    }
+    return items;
 }
 
 std::string ToolsService::diffFilesSync(

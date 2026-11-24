@@ -2,6 +2,7 @@
 
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
+#import <MetalKit/MetalKit.h>
 
 namespace mc::platform {
 
@@ -178,6 +179,31 @@ void showQuickLook(const std::string& path) {
     task.standardOutput = [NSFileHandle fileHandleWithNullDevice];
     task.standardError = [NSFileHandle fileHandleWithNullDevice];
     [task launchAndReturnError:nil];
+}
+
+void* loadMetalTexture(const std::string& imagePath, void* mtlDevice, int& outWidth, int& outHeight) {
+    if (imagePath.empty() || !mtlDevice) return nullptr;
+    NSURL* url = urlFromPath(imagePath);
+    if (!url) return nullptr;
+
+    id<MTLDevice> device = (__bridge id<MTLDevice>)mtlDevice;
+    MTKTextureLoader* loader = [[MTKTextureLoader alloc] initWithDevice:device];
+    NSError* err = nil;
+    NSDictionary* opts = @{
+        MTKTextureLoaderOptionSRGB: @NO,
+        MTKTextureLoaderOptionGenerateMipmaps: @NO
+    };
+    id<MTLTexture> tex = [loader newTextureWithContentsOfURL:url options:opts error:&err];
+    if (!tex) return nullptr;
+    outWidth = (int)tex.width;
+    outHeight = (int)tex.height;
+    return (__bridge_retained void*)tex;
+}
+
+void releaseMetalTexture(void* texturePtr) {
+    if (!texturePtr) return;
+    id<MTLTexture> tex = (__bridge_transfer id<MTLTexture>)texturePtr;
+    (void)tex;
 }
 
 static NSString* const kCustomFavoritesKey = @"MCommander.CustomFavorites.v2";

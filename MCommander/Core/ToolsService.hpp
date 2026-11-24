@@ -65,6 +65,23 @@ public:
         const std::string& password = ""
     );
 
+    static std::vector<FileItem> listArchiveEntriesSync(
+        const std::string& archivePath,
+        const std::string& archiveSubdir,
+        const std::string& password,
+        std::string& errorOut
+    );
+
+    static bool extractArchiveEntriesSync(
+        const std::string& archivePath,
+        const std::vector<std::string>& internalPaths,
+        const std::string& destinationDirectory,
+        const std::string& password,
+        std::string& errorOut
+    );
+
+    static std::vector<UserMenuItem> loadUserMenu();
+
     static std::string diffFilesSync(
         const std::string& leftFilePath,
         const std::string& rightFilePath
