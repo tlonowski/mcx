@@ -165,7 +165,7 @@
                                               styleMask:style
                                                 backing:NSBackingStoreBuffered
                                                   defer:NO];
-    self.window.title = @"mcx " MCX_VERSION;
+    self.window.title = @"mcx " MCX_FULL_VERSION;
     self.window.minSize = NSMakeSize(960, 580);
     self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
     self.window.backgroundColor = [NSColor colorWithRed:0.153 green:0.157 blue:0.133 alpha:1.0];

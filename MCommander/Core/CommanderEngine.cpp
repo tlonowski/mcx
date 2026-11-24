@@ -39,6 +39,7 @@ CommanderEngine::CommanderEngine()
     Localization::instance().initialize(platform::localeSearchDirectories(), saved.language);
     activeSide = saved.activeSide;
     splitRatio = saved.splitRatio;
+    fontScale = saved.fontScale;
     showHiddenFiles = saved.showHiddenFiles;
     showInspector = saved.showInspector;
 
@@ -104,6 +105,7 @@ void CommanderEngine::saveSettings() const {
     s.splitRatio = splitRatio;
     s.showHiddenFiles = showHiddenFiles;
     s.showInspector = showInspector;
+    s.fontScale = fontScale;
     s.language = Localization::instance().currentLanguage();
     platform::saveAppSettings(s);
 }

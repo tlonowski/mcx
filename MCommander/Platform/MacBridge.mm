@@ -274,6 +274,10 @@ AppSettings loadAppSettings() {
     }
     if (NSNumber* hid = dict[@"showHiddenFiles"]) s.showHiddenFiles = hid.boolValue;
     if (NSNumber* insp = dict[@"showInspector"]) s.showInspector = insp.boolValue;
+    if (NSNumber* fs = dict[@"fontScale"]) {
+        float sc = fs.floatValue;
+        if (sc >= 0.7f && sc <= 1.7f) s.fontScale = sc;
+    }
     if (NSString* lang = dict[@"language"]) {
         if ([lang isKindOfClass:[NSString class]] && lang.length > 0) {
             s.language = std::string([lang UTF8String]);
@@ -291,6 +295,7 @@ void saveAppSettings(const AppSettings& settings) {
         @"splitRatio": @(settings.splitRatio),
         @"showHiddenFiles": @(settings.showHiddenFiles),
         @"showInspector": @(settings.showInspector),
+        @"fontScale": @(settings.fontScale),
         @"language": lang
     };
     NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];

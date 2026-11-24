@@ -132,6 +132,7 @@ public:
     bool showHiddenFiles = false;
     bool showInspector = false;
     float splitRatio = 0.5f;
+    float fontScale = 1.0f;
     bool subshellFullScreen = false; // Ctrl+O Midnight Commander subshell
     bool infoPanelActive = false;    // Ctrl+X I Midnight Commander Info panel
     QuickViewState quickView;

@@ -195,6 +195,7 @@ struct AppSettings {
     float splitRatio = 0.5f;
     bool showHiddenFiles = false;
     bool showInspector = false;
+    float fontScale = 1.0f;
     std::string language = "pl";
 };
 

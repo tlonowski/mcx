@@ -172,6 +172,7 @@ CommanderUI::CommanderUI(CommanderEngine &engine, ThemeFonts fonts)
 
 void CommanderUI::render() {
   engine_.tick();
+  ImGui::GetStyle().FontScaleMain = engine_.fontScale;
   handleGlobalShortcuts();
 
   if (engine_.requestCommandFocus) {
@@ -589,6 +590,20 @@ void CommanderUI::handleGlobalShortcuts() {
     engine_.goUp();
   } else if (ImGui::IsKeyPressed(ImGuiKey_Backslash)) {
     engine_.goToRoot();
+  } else if (shift && (ImGui::IsKeyPressed(ImGuiKey_Equal) ||
+                       ImGui::IsKeyPressed(ImGuiKey_KeypadAdd))) {
+    engine_.fontScale = std::clamp(engine_.fontScale + 0.05f, 0.75f, 1.60f);
+    engine_.saveSettings();
+    char buf[48];
+    std::snprintf(buf, sizeof(buf), "Czcionka: %.0f%%", engine_.fontScale * 100.0f);
+    engine_.showToast(buf);
+  } else if (shift && (ImGui::IsKeyPressed(ImGuiKey_Minus) ||
+                       ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract))) {
+    engine_.fontScale = std::clamp(engine_.fontScale - 0.05f, 0.75f, 1.60f);
+    engine_.saveSettings();
+    char buf[48];
+    std::snprintf(buf, sizeof(buf), "Czcionka: %.0f%%", engine_.fontScale * 100.0f);
+    engine_.showToast(buf);
   } else if (ImGui::IsKeyPressed(ImGuiKey_Equal) ||
              ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) {
     engine_.triggerSelectByPattern(true);
@@ -1157,7 +1172,7 @@ void CommanderUI::renderFilePane(PaneState &pane, float width, float height) {
                             ? engine_.requestScrollToCursorLeft
                             : engine_.requestScrollToCursorRight;
 
-      constexpr float rowHeight = 25.0f;
+      const float rowHeight = std::round(25.0f * engine_.fontScale);
       ImGuiListClipper clipper;
       clipper.Begin(static_cast<int>(tab.displayedItems.size()), rowHeight);
       while (clipper.Step()) {
@@ -2663,8 +2678,8 @@ void CommanderUI::renderDialogs() {
                         ImVec2(0, ImGui::GetContentRegionAvail().y - 36.0f),
                         ImGuiChildFlags_Borders);
       ImGui::TextColored(AntigravityColors::markedGold,
-                         "%s v%s (build %s)  —  C++20 / Metal", MCX_APP_NAME,
-                         MCX_VERSION, MCX_BUILD);
+                         "%s v%s  —  C++20 / Metal", MCX_APP_NAME,
+                         MCX_FULL_VERSION);
       ImGui::Separator();
       ImGui::Spacing();
       ImGui::TextColored(AntigravityColors::accent,
