@@ -201,8 +201,29 @@ void CommanderEngine::toggleInfoPanel() {
 
 void CommanderEngine::toggleSubshell() {
     subshellFullScreen = !subshellFullScreen;
+    std::string panelDir = activePane().activeTab().currentPath;
     if (subshellFullScreen) {
-        requestCommandFocus = true;
+        if (!ptyTerminal.isRunning()) {
+            ptyTerminal.start(panelDir);
+            lastSubshellDir_ = panelDir;
+        } else if (!activePane().activeTab().isRemote() && panelDir != lastSubshellDir_) {
+            ptyTerminal.changeDirectory(panelDir);
+            lastSubshellDir_ = panelDir;
+        }
+        requestCommandFocus = false;
+    } else {
+        std::string shellDir = ptyTerminal.currentWorkingDirectory();
+        if (!shellDir.empty()) {
+            lastSubshellDir_ = shellDir;
+            std::error_code ec;
+            if (!activePane().activeTab().isRemote() &&
+                normalizeDirPath(shellDir) != normalizeDirPath(panelDir) &&
+                fs::exists(shellDir, ec) && fs::is_directory(shellDir, ec)) {
+                navigate(shellDir, activeSide, true);
+                return;
+            }
+        }
+        refreshPane(activeSide);
     }
 }
 

@@ -3,6 +3,7 @@
 #include "FileSystemService.hpp"
 #include "Models.hpp"
 #include "PaneState.hpp"
+#include "PtyTerminal.hpp"
 #include "ToolsService.hpp"
 
 #include <atomic>
@@ -152,6 +153,7 @@ public:
     float splitRatio = 0.5f;
     float fontScale = 1.0f;
     bool subshellFullScreen = false; // Ctrl+O Midnight Commander subshell
+    PtyTerminal ptyTerminal;
     bool infoPanelActive = false;    // Ctrl+X I Midnight Commander Info panel
     QuickViewState quickView;
 
@@ -302,6 +304,7 @@ private:
     std::atomic<bool> shuttingDown_{false};
     std::shared_ptr<std::atomic<bool>> transferCancelFlag_;
     std::chrono::steady_clock::time_point toastExpiry_;
+    std::string lastSubshellDir_;
 
     void postMain(std::function<void()> fn);
     void spawnWorker(std::function<void()> fn);

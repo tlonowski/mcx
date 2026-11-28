@@ -20,8 +20,10 @@ private:
     bool openTopMenuNextFrame_ = false;
     PaneSide hotlistSide_ = PaneSide::Left;
     PaneSide historySide_ = PaneSide::Left;
+    int terminalScrollOffset_ = 0;
 
     void handleGlobalShortcuts();
+    void handleTerminalInput();
     void renderTopToolbar();
     void renderDualDriveBars(float leftW, float rightW, float splitterW);
     void renderSingleDriveBar(PaneState& pane, float width);

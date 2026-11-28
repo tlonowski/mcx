@@ -324,6 +324,11 @@ void CommanderUI::handleGlobalShortcuts() {
     return;
   }
 
+  if (engine_.subshellFullScreen) {
+    handleTerminalInput();
+    return;
+  }
+
   // Midnight Commander Alt+O: Open highlighted directory in opposite panel
   if (alt && ImGui::IsKeyPressed(ImGuiKey_O)) {
     engine_.openCursorDirInOppositePane();
@@ -1632,60 +1637,223 @@ void CommanderUI::renderInfoPane(PaneSide side, float width, float height) {
   ImGui::PopID();
 }
 
+static void appendUtf8(std::string &out, uint32_t cp) {
+  if (cp < 0x80) {
+    out.push_back(static_cast<char>(cp));
+  } else if (cp < 0x800) {
+    out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  } else if (cp < 0x10000) {
+    out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  } else {
+    out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+    out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+    out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  }
+}
+
+void CommanderUI::handleTerminalInput() {
+  ImGuiIO &io = ImGui::GetIO();
+  if (!engine_.ptyTerminal.isRunning() || io.WantTextInput)
+    return;
+
+  bool ctrl = io.KeyCtrl;
+  bool cmd = io.KeySuper;
+
+  if (cmd && ImGui::IsKeyPressed(ImGuiKey_V)) {
+    if (const char *clip = ImGui::GetClipboardText()) {
+      engine_.ptyTerminal.writeString(clip);
+      terminalScrollOffset_ = 0;
+    }
+    return;
+  }
+
+  // Forward typed Unicode characters
+  if (io.InputQueueCharacters.Size > 0 && !ctrl && !cmd) {
+    std::string utf8;
+    for (int i = 0; i < io.InputQueueCharacters.Size; ++i) {
+      ImWchar ch = io.InputQueueCharacters[i];
+      if (ch >= 0x20 && ch != 0x7F) {
+        appendUtf8(utf8, static_cast<uint32_t>(ch));
+      }
+    }
+    if (!utf8.empty()) {
+      engine_.ptyTerminal.writeString(utf8);
+      terminalScrollOffset_ = 0;
+    }
+  }
+
+  // Control keys A..Z (except Ctrl+O handled above)
+  if (ctrl && !cmd) {
+    for (int k = 0; k < 26; ++k) {
+      ImGuiKey key = static_cast<ImGuiKey>(ImGuiKey_A + k);
+      if (key == ImGuiKey_O)
+        continue;
+      if (ImGui::IsKeyPressed(key)) {
+        char ch = static_cast<char>(1 + k);
+        engine_.ptyTerminal.writeBytes(&ch, 1);
+        terminalScrollOffset_ = 0;
+      }
+    }
+    return;
+  }
+
+  struct KeySeq {
+    ImGuiKey key;
+    const char *seq;
+  };
+  static constexpr KeySeq kSpecials[] = {
+      {ImGuiKey_Enter, "\r"},
+      {ImGuiKey_KeypadEnter, "\r"},
+      {ImGuiKey_Backspace, "\x7f"},
+      {ImGuiKey_Tab, "\t"},
+      {ImGuiKey_Escape, "\x1b"},
+      {ImGuiKey_UpArrow, "\x1b[A"},
+      {ImGuiKey_DownArrow, "\x1b[B"},
+      {ImGuiKey_RightArrow, "\x1b[C"},
+      {ImGuiKey_LeftArrow, "\x1b[D"},
+      {ImGuiKey_Home, "\x1b[H"},
+      {ImGuiKey_End, "\x1b[F"},
+      {ImGuiKey_PageUp, "\x1b[5~"},
+      {ImGuiKey_PageDown, "\x1b[6~"},
+      {ImGuiKey_Delete, "\x1b[3~"},
+  };
+  for (const auto &ks : kSpecials) {
+    if (ImGui::IsKeyPressed(ks.key)) {
+      engine_.ptyTerminal.writeString(ks.seq);
+      terminalScrollOffset_ = 0;
+    }
+  }
+}
+
 void CommanderUI::renderSubshellView(float width, float height) {
   ImGui::PushStyleColor(ImGuiCol_ChildBg, AntigravityColors::bgCanvas);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 8.0f));
   ImGui::BeginChild("##MCSubshellBox", ImVec2(width, height),
                     ImGuiChildFlags_Borders);
 
+  std::string shellCwd = engine_.ptyTerminal.currentWorkingDirectory();
+  if (shellCwd.empty())
+    shellCwd = engine_.activePane().activeTab().currentPath;
+
   ImGui::TextColored(
       AntigravityColors::accent,
-      "POWŁOKA MIDNIGHT COMMANDER (zsh)   —   Katalog roboczy: %s",
-      engine_.activePane().activeTab().currentPath.c_str());
-  ImGui::SameLine(width - 210.0f);
-  if (boxButton("Wróć do paneli (Ctrl+O)", true)) {
-    engine_.subshellFullScreen = false;
+      "INTERAKTYWNA POWŁOKA (zsh / forkpty)   —   %s",
+      shellCwd.c_str());
+  ImGui::SameLine(std::max(240.0f, width - 310.0f));
+  if (!engine_.ptyTerminal.isRunning()) {
+    if (boxButton("Uruchom zsh ponownie", true)) {
+      engine_.ptyTerminal.start(engine_.activePane().activeTab().currentPath);
+    }
+  } else {
+    if (boxButton("Wyczyść (Ctrl+L)")) {
+      engine_.ptyTerminal.writeBytes("\x0c", 1);
+    }
   }
-  ImGui::Separator();
-  ImGui::Spacing();
-
-  if (boxButton("ls -la"))
-    engine_.runQuickCommandInActiveDir("ls -la", "ls -la");
   ImGui::SameLine();
-  if (boxButton("git status"))
-    engine_.runQuickCommandInActiveDir("git status", "git status");
-  ImGui::SameLine();
-  if (boxButton("git log -n 10 --oneline"))
-    engine_.runQuickCommandInActiveDir("git log -n 10 --oneline", "git log");
-  ImGui::SameLine();
-  if (boxButton("df -h"))
-    engine_.runQuickCommandInActiveDir("df -h", "df -h");
-  ImGui::SameLine();
-  if (boxButton("ps aux | head -n 25"))
-    engine_.runQuickCommandInActiveDir("ps aux | head -n 25", "ps aux");
-
-  ImGui::Spacing();
+  if (boxButton("Wróć do paneli (Ctrl+O)", true)) {
+    engine_.toggleSubshell();
+  }
   ImGui::Separator();
 
   if (fonts_.mono)
     ImGui::PushFont(fonts_.mono);
-  ImGui::BeginChild("##SubshellOutputArea", ImVec2(0, 0),
-                    ImGuiChildFlags_Borders);
-  if (engine_.lastCommandResult.has_value()) {
-    const auto &res = *engine_.lastCommandResult;
-    ImGui::TextColored(res.exitCode == 0 ? AntigravityColors::successGreen
-                                         : AntigravityColors::dangerRed,
-                       "[%s]$ %s   (exit %d)", res.workingDirectory.c_str(),
-                       res.command.c_str(), res.exitCode);
-    ImGui::Separator();
-    ImGui::TextUnformatted(res.output.c_str());
-  } else {
-    ImGui::TextColored(
-        AntigravityColors::textMuted,
-        "Wpisz dowolne polecenie w wierszu poleceń poniżej i naciśnij Enter.\n"
-        "Naciśnij Ctrl+O, aby błyskawicznie przełączać między dwoma panelami a "
-        "pełnym ekranem powłoki.");
+
+  ImGui::BeginChild("##SubshellPtyArea", ImVec2(0, 0),
+                    ImGuiChildFlags_Borders,
+                    ImGuiWindowFlags_NoScrollWithMouse);
+
+  ImVec2 origin = ImGui::GetCursorScreenPos();
+  ImVec2 avail = ImGui::GetContentRegionAvail();
+  float cellW = ImGui::CalcTextSize("M").x;
+  float cellH = ImGui::GetFontSize() * 1.25f;
+  if (cellW < 4.0f)
+    cellW = 8.0f;
+  if (cellH < 8.0f)
+    cellH = 16.0f;
+
+  int cols = std::max(20, static_cast<int>(avail.x / cellW));
+  int rows = std::max(5, static_cast<int>(avail.y / cellH));
+  engine_.ptyTerminal.resize(rows, cols);
+
+  TerminalSnapshot snap = engine_.ptyTerminal.snapshot();
+  if (ImGui::IsWindowHovered() && ImGui::GetIO().MouseWheel != 0.0f) {
+    terminalScrollOffset_ += static_cast<int>(ImGui::GetIO().MouseWheel * 3.0f);
+    terminalScrollOffset_ =
+        std::clamp(terminalScrollOffset_, 0,
+                   static_cast<int>(snap.scrollback.size()));
   }
+
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  int sbSize = static_cast<int>(snap.scrollback.size());
+  int startGlobalRow = std::max(0, sbSize - terminalScrollOffset_);
+
+  auto drawRowCells = [&](int visualRow, const std::vector<TerminalCell> &row) {
+    float y = origin.y + visualRow * cellH;
+    int limit = std::min(cols, static_cast<int>(row.size()));
+    std::string runUtf8;
+    uint32_t runFg = 0;
+    int runStartCol = 0;
+
+    auto flushRun = [&]() {
+      if (runUtf8.empty())
+        return;
+      dl->AddText(ImVec2(origin.x + runStartCol * cellW, y), runFg,
+                  runUtf8.c_str());
+      runUtf8.clear();
+    };
+
+    for (int c = 0; c < limit; ++c) {
+      const auto &cell = row[static_cast<size_t>(c)];
+      if (cell.bgRgba != 0) {
+        flushRun();
+        dl->AddRectFilled(
+            ImVec2(origin.x + c * cellW, y),
+            ImVec2(origin.x + (c + 1) * cellW, y + cellH), cell.bgRgba);
+      }
+      if (cell.cp == ' ' || cell.cp == 0) {
+        flushRun();
+        continue;
+      }
+      if (!runUtf8.empty() && cell.fgRgba != runFg) {
+        flushRun();
+      }
+      if (runUtf8.empty()) {
+        runStartCol = c;
+        runFg = cell.fgRgba;
+      }
+      appendUtf8(runUtf8, cell.cp);
+    }
+    flushRun();
+  };
+
+  for (int r = 0; r < rows; ++r) {
+    int gIdx = startGlobalRow + r;
+    if (gIdx < sbSize) {
+      drawRowCells(r, snap.scrollback[static_cast<size_t>(gIdx)]);
+    } else {
+      int scrIdx = gIdx - sbSize;
+      if (scrIdx >= 0 && scrIdx < static_cast<int>(snap.screen.size())) {
+        drawRowCells(r, snap.screen[static_cast<size_t>(scrIdx)]);
+      }
+    }
+  }
+
+  if (snap.cursorVisible && terminalScrollOffset_ == 0 &&
+      engine_.ptyTerminal.isRunning()) {
+    int curVisualRow = snap.cursorRow;
+    if (curVisualRow >= 0 && curVisualRow < rows && snap.cursorCol >= 0 &&
+        snap.cursorCol < cols) {
+      float cx = origin.x + snap.cursorCol * cellW;
+      float cy = origin.y + curVisualRow * cellH;
+      dl->AddRectFilled(ImVec2(cx, cy), ImVec2(cx + cellW, cy + cellH),
+                        IM_COL32(166, 226, 46, 150));
+    }
+  }
+
   ImGui::EndChild();
   if (fonts_.mono)
     ImGui::PopFont();
