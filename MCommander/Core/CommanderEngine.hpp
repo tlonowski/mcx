@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -107,6 +108,7 @@ struct DialogState {
     std::string viewerSearchQuery;
     std::string editorBuffer;
     bool editorDirty = false;
+    bool editorPreviewHighlight = false;
 
     // Editable User Menu (F2)
     std::vector<UserMenuItem> userMenuItems;
@@ -176,6 +178,7 @@ public:
     bool requestHistoryPopup = false;
 
     std::optional<FileOperationProgress> operationProgress;
+    std::deque<QueuedTransferJob> transferQueue;
     std::string toastMessage;
     std::string errorAlertMessage;
     void* mtlDevice = nullptr;
@@ -261,6 +264,8 @@ public:
     void deleteItems(const std::vector<FileItem>& items, bool permanently, PaneSide side);
 
     void startTransfer(const std::vector<std::string>& sourcePaths, const std::string& destDir, bool isMove, ConflictResolutionPolicy policy, bool inBackground = false);
+    void enqueueTransfer(const std::vector<std::string>& sourcePaths, const std::string& destDir, bool isMove, ConflictResolutionPolicy policy);
+    void clearTransferQueue();
     void startArchiveExtract(const std::string& archivePath, const std::vector<std::string>& internalPaths, const std::string& destDir, bool inBackground = false);
     void startRemoteTransfer(const std::optional<RemoteConnection>& fromRemote, const std::optional<RemoteConnection>& toRemote, const std::vector<FileItem>& items, const std::string& localDestDir, bool inBackground = false);
     void handleDroppedFiles(const std::vector<std::string>& paths, PaneSide targetSide, bool isMove);
@@ -306,6 +311,9 @@ private:
     std::shared_ptr<std::atomic<bool>> transferCancelFlag_;
     std::chrono::steady_clock::time_point toastExpiry_;
     std::string lastSubshellDir_;
+    uint64_t nextTransferJobId_ = 1;
+
+    void processNextQueuedTransfer();
 
     void postMain(std::function<void()> fn);
     void spawnWorker(std::function<void()> fn);

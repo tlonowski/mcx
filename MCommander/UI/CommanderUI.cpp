@@ -1,5 +1,6 @@
 #include "CommanderUI.hpp"
 #include "../Core/Localization.hpp"
+#include "../Core/SyntaxHighlighter.hpp"
 #include "../Core/Version.hpp"
 #include "../Platform/MacBridge.hpp"
 #include "../Vendor/imgui/imgui.h"
@@ -16,6 +17,8 @@
 namespace fs = std::filesystem;
 
 namespace mc::ui {
+
+static void renderSyntaxText(const std::string &text, SyntaxLanguage lang);
 
 namespace {
 
@@ -1628,7 +1631,11 @@ void CommanderUI::renderQuickViewPane(PaneSide side, float width,
                                      ? engine_.quickView.hexContent
                                      : engine_.quickView.textContent;
     ImGui::BeginChild("##QVScroll", ImVec2(0, 0));
-    ImGui::TextUnformatted(content.c_str());
+    if (engine_.quickView.hexMode) {
+      ImGui::TextUnformatted(content.c_str());
+    } else {
+      renderSyntaxText(content, detectSyntaxLanguage(item->name));
+    }
     ImGui::EndChild();
     if (fonts_.mono)
       ImGui::PopFont();
@@ -1703,6 +1710,43 @@ void CommanderUI::renderInfoPane(PaneSide side, float width, float height) {
   ImGui::PopStyleVar();
   ImGui::PopStyleColor();
   ImGui::PopID();
+}
+
+static void renderSyntaxText(const std::string &text, SyntaxLanguage lang) {
+  if (lang == SyntaxLanguage::Plain) {
+    ImGui::TextUnformatted(text.c_str());
+    return;
+  }
+
+  std::istringstream iss(text);
+  std::string line;
+  bool inBlockComment = false;
+  int lineIdx = 0;
+  constexpr int kMaxHighlightedLines = 4000;
+  while (std::getline(iss, line)) {
+    if (!line.empty() && line.back() == '\r')
+      line.pop_back();
+    if (lineIdx >= kMaxHighlightedLines) {
+      ImGui::TextUnformatted(line.c_str());
+      continue;
+    }
+    ++lineIdx;
+    auto spans = tokenizeSyntaxLine(line, lang, inBlockComment);
+    if (spans.empty()) {
+      ImGui::NewLine();
+      continue;
+    }
+    for (size_t i = 0; i < spans.size(); ++i) {
+      if (i > 0)
+        ImGui::SameLine(0.0f, 0.0f);
+      const auto &sp = spans[i];
+      ImVec4 col = ImGui::ColorConvertU32ToFloat4(syntaxTokenColor(sp.kind));
+      ImGui::PushStyleColor(ImGuiCol_Text, col);
+      ImGui::TextUnformatted(line.data() + sp.start,
+                             line.data() + sp.start + sp.length);
+      ImGui::PopStyleColor();
+    }
+  }
 }
 
 static void appendUtf8(std::string &out, uint32_t cp) {
@@ -2329,6 +2373,17 @@ void CommanderUI::renderDialogs() {
         ImGui::SameLine();
         if (boxButton(tr("dialog.transfer.background"))) {
           runTransfer(true);
+        }
+        if (!d.fromRemote.has_value() && !d.toRemote.has_value()) {
+          ImGui::SameLine();
+          if (boxButton(tr("dialog.transfer.queue")) ||
+              ImGui::IsKeyPressed(ImGuiKey_F2)) {
+            std::vector<std::string> paths;
+            for (const auto &it : d.targetItems)
+              paths.push_back(it.path);
+            engine_.enqueueTransfer(paths, d.destinationPath, d.isMove,
+                                    d.conflictPolicy);
+          }
         }
       }
       ImGui::SameLine();
@@ -2982,7 +3037,11 @@ void CommanderUI::renderDialogs() {
             d.viewerHexMode ? d.viewerHexText : d.viewerText;
         ImGui::BeginChild("##ViewerScroll", ImVec2(0, 0),
                           ImGuiChildFlags_Borders);
-        ImGui::TextUnformatted(content.c_str());
+        if (d.viewerHexMode) {
+          ImGui::TextUnformatted(content.c_str());
+        } else {
+          renderSyntaxText(content, detectSyntaxLanguage(d.targetItem.name));
+        }
         ImGui::EndChild();
         if (fonts_.mono)
           ImGui::PopFont();
@@ -3001,6 +3060,9 @@ void CommanderUI::renderDialogs() {
       if (boxButton("Zapisz (F2)", true))
         engine_.saveEditor();
       ImGui::SameLine();
+      if (boxButton(tr("editor.syntax_preview"), d.editorPreviewHighlight))
+        d.editorPreviewHighlight = !d.editorPreviewHighlight;
+      ImGui::SameLine();
       if (boxButton("Zamknij (Esc)"))
         d.kind = DialogKind::None;
       ImGui::Separator();
@@ -3008,8 +3070,16 @@ void CommanderUI::renderDialogs() {
       if (fonts_.mono)
         ImGui::PushFont(fonts_.mono);
       ImVec2 avail = ImGui::GetContentRegionAvail();
-      if (ImGui::InputTextMultiline("##EditorBuf", &d.editorBuffer, avail)) {
-        d.editorDirty = true;
+      if (d.editorPreviewHighlight) {
+        ImGui::BeginChild("##EditorSyntaxView", ImVec2(0, 0),
+                          ImGuiChildFlags_Borders);
+        renderSyntaxText(d.editorBuffer,
+                         detectSyntaxLanguage(d.targetItem.name));
+        ImGui::EndChild();
+      } else {
+        if (ImGui::InputTextMultiline("##EditorBuf", &d.editorBuffer, avail)) {
+          d.editorDirty = true;
+        }
       }
       if (fonts_.mono)
         ImGui::PopFont();
@@ -3262,13 +3332,23 @@ void CommanderUI::renderToastAndProgress() {
                        ImGuiWindowFlags_AlwaysAutoResize);
       ImGui::TextColored(AntigravityColors::accent, "[%s]",
                          tr("dialog.transfer.in_background"));
+      if (!engine_.transferQueue.empty()) {
+        ImGui::SameLine();
+        ImGui::TextColored(AntigravityColors::markedGold, "(+%zu)",
+                           engine_.transferQueue.size());
+      }
       ImGui::SameLine();
       ImGui::Text("%s (%d/%d) %s", prog.title.c_str(), prog.completedCount,
                   prog.totalCount, prog.currentItemName.c_str());
-      ImGui::ProgressBar(prog.fraction(), ImVec2(410, 8));
+      ImGui::ProgressBar(prog.fraction(), ImVec2(370, 8));
       ImGui::SameLine();
       if (boxButton(tr("common.cancel")))
         engine_.cancelActiveTransfer();
+      if (!engine_.transferQueue.empty()) {
+        ImGui::SameLine();
+        if (boxButton("Wyczyść kol."))
+          engine_.clearTransferQueue();
+      }
       ImGui::End();
       ImGui::PopStyleColor(2);
       ImGui::PopStyleVar();

@@ -154,5 +154,7 @@
   "dialog.connect_remote.prompt": "Adres URI (sh://user@host/ścieżka lub sftp://user@host):",
   "dialog.connect_remote.hint": "Używa kluczy SSH z ~/.ssh oraz konfiguracji ~/.ssh/config.",
   "dialog.connect_remote.btn": "Połącz",
-  "menu.ncdu_mode": "Analiza rozmiaru (widok ncdu)"
+  "menu.ncdu_mode": "Analiza rozmiaru (widok ncdu)",
+  "dialog.transfer.queue": "F2 W kolejkę",
+  "editor.syntax_preview": "Podgląd składni"
 }

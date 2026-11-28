@@ -1493,10 +1493,12 @@ void CommanderEngine::startTransfer(
                     showToast((isMove ? "Przeniesiono " : "Skopiowano ") + std::to_string(totalCount) + " el.");
                     activePane().activeTab().deselectAll();
                     refreshAllVisibleTabs();
+                    processNextQueuedTransfer();
                     break;
                 case TransferStatus::Cancelled:
                     showToast("Operacja anulowana");
                     refreshAllVisibleTabs();
+                    processNextQueuedTransfer();
                     break;
                 case TransferStatus::ConflictNeedsDecision:
                     dialog = DialogState{};
@@ -1510,10 +1512,48 @@ void CommanderEngine::startTransfer(
                 case TransferStatus::Error:
                     errorAlertMessage = outcome.errorMessage;
                     refreshAllVisibleTabs();
+                    processNextQueuedTransfer();
                     break;
             }
         });
     });
+}
+
+void CommanderEngine::enqueueTransfer(
+    const std::vector<std::string>& sourcePaths,
+    const std::string& destDir,
+    bool isMove,
+    ConflictResolutionPolicy policy
+) {
+    dialog.kind = DialogKind::None;
+    if (sourcePaths.empty()) return;
+
+    if (!operationProgress.has_value() && transferQueue.empty()) {
+        startTransfer(sourcePaths, destDir, isMove, policy, true);
+        return;
+    }
+
+    QueuedTransferJob job;
+    job.id = nextTransferJobId_++;
+    job.sourcePaths = sourcePaths;
+    job.destinationPath = destDir;
+    job.isMove = isMove;
+    job.conflictPolicy = policy;
+    job.label = (isMove ? "Przenieś " : "Kopiuj ") + std::to_string(sourcePaths.size()) + " el.";
+    transferQueue.push_back(std::move(job));
+    showToast("Dodano do kolejki (oczekujących: " + std::to_string(transferQueue.size()) + ")");
+}
+
+void CommanderEngine::clearTransferQueue() {
+    transferQueue.clear();
+    showToast("Wyczyszczono kolejkę transferów");
+}
+
+void CommanderEngine::processNextQueuedTransfer() {
+    if (shuttingDown_.load() || operationProgress.has_value() || transferQueue.empty()) return;
+    QueuedTransferJob next = std::move(transferQueue.front());
+    transferQueue.pop_front();
+    startTransfer(next.sourcePaths, next.destinationPath, next.isMove, next.conflictPolicy, true);
 }
 
 void CommanderEngine::moveTransferToBackground() {

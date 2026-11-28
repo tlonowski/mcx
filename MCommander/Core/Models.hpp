@@ -147,6 +147,15 @@ struct RemoteConnection {
     }
 };
 
+struct QueuedTransferJob {
+    uint64_t id = 0;
+    std::vector<std::string> sourcePaths;
+    std::string destinationPath;
+    bool isMove = false;
+    ConflictResolutionPolicy conflictPolicy = ConflictResolutionPolicy::Ask;
+    std::string label;
+};
+
 bool parseRemoteUri(const std::string& input, RemoteConnection& out);
 
 struct SearchResultItem {
