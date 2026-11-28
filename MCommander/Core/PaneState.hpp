@@ -32,6 +32,7 @@ struct PaneTabState {
     FileSortField sortField = FileSortField::Name;
     bool sortAscending = true;
     bool briefMode = false;
+    bool diskUsageMode = false;
 
     std::unordered_set<std::string> selectedPaths;
     std::unordered_set<std::string> highlightedDiffPaths;

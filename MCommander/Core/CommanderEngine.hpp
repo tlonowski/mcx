@@ -196,6 +196,7 @@ public:
     void toggleQuickView();
     void toggleInfoPanel();
     void toggleSubshell();
+    void toggleDiskUsageMode(std::optional<PaneSide> side = std::nullopt);
     void openCursorDirInOppositePane(); // Alt+O (Midnight Commander)
     void updateQuickViewIfNeeded();
 

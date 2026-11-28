@@ -469,6 +469,9 @@ void CommanderEngine::loadDirectory(
                                 }
                             }
                         }
+                        if (t.diskUsageMode && !t.isRemote() && !t.isInsideArchive()) {
+                            calculateAllDirectorySizes(side);
+                        }
                     }
                     break;
                 }
@@ -662,6 +665,9 @@ void CommanderEngine::loadRemoteDirectory(PaneSide side, uint64_t tabID, const R
                                 }
                             }
                         }
+                        if (t.diskUsageMode && !t.isRemote() && !t.isInsideArchive()) {
+                            calculateAllDirectorySizes(side);
+                        }
                     }
                     break;
                 }
@@ -789,6 +795,27 @@ void CommanderEngine::calculateAllDirectorySizes(std::optional<PaneSide> side) {
             showToast("Obliczono rozmiary katalogów");
         });
     });
+}
+
+void CommanderEngine::toggleDiskUsageMode(std::optional<PaneSide> side) {
+    PaneSide targetSide = side.value_or(activeSide);
+    auto& tab = pane(targetSide).activeTab();
+    tab.diskUsageMode = !tab.diskUsageMode;
+    if (tab.diskUsageMode) {
+        tab.briefMode = false;
+        tab.sortField = FileSortField::Size;
+        tab.sortAscending = false;
+        tab.recomputeDisplayedItems();
+        if (!tab.isRemote() && !tab.isInsideArchive()) {
+            calculateAllDirectorySizes(targetSide);
+        }
+        showToast("Widok analizy rozmiaru (ncdu) włączony");
+    } else {
+        tab.sortField = FileSortField::Name;
+        tab.sortAscending = true;
+        tab.recomputeDisplayedItems();
+        showToast("Widok analizy rozmiaru (ncdu) wyłączony");
+    }
 }
 
 void CommanderEngine::addTab(std::optional<PaneSide> side, const std::string& path) {

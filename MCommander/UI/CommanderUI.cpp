@@ -354,6 +354,12 @@ void CommanderUI::handleGlobalShortcuts() {
     return;
   }
 
+  // Disk Usage / ncdu mode (Ctrl+Space)
+  if (ctrl && ImGui::IsKeyPressed(ImGuiKey_Space)) {
+    engine_.toggleDiskUsageMode();
+    return;
+  }
+
   // Quick View Panel (Ctrl+Q) & Info Panel (Ctrl+I)
   if (ctrl && ImGui::IsKeyPressed(ImGuiKey_Q)) {
     engine_.toggleQuickView();
@@ -769,6 +775,9 @@ void CommanderUI::renderTopToolbar() {
       engine_.triggerChecksums();
     if (ImGui::MenuItem(tr("menu.dir_sizes"), "Alt+Shift+Enter"))
       engine_.calculateAllDirectorySizes();
+    if (ImGui::MenuItem(tr("menu.ncdu_mode"), "Ctrl+Space",
+                        engine_.activePane().activeTab().diskUsageMode))
+      engine_.toggleDiskUsageMode();
     ImGui::Separator();
     if (ImGui::MenuItem(tr("menu.info_panel_opp"), "Ctrl+I",
                         engine_.infoPanelActive))
@@ -1193,6 +1202,28 @@ void CommanderUI::renderFilePane(PaneState &pane, float width, float height) {
                             ? engine_.requestScrollToCursorLeft
                             : engine_.requestScrollToCursorRight;
 
+      int64_t totalDiskBytes = 0;
+      int64_t maxDiskBytes = 0;
+      if (tab.diskUsageMode && !tab.briefMode) {
+        for (const auto &it : tab.displayedItems) {
+          if (it.isParentEntry)
+            continue;
+          int64_t sz = -1;
+          if (it.isNavigableDirectory()) {
+            auto f = tab.directorySizes.find(it.path);
+            if (f != tab.directorySizes.end())
+              sz = f->second;
+          } else if (it.size.has_value()) {
+            sz = *it.size;
+          }
+          if (sz > 0) {
+            totalDiskBytes += sz;
+            if (sz > maxDiskBytes)
+              maxDiskBytes = sz;
+          }
+        }
+      }
+
       const float rowHeight = std::round(25.0f * engine_.fontScale);
       ImGuiListClipper clipper;
       clipper.Begin(static_cast<int>(tab.displayedItems.size()), rowHeight);
@@ -1386,18 +1417,55 @@ void CommanderUI::renderFilePane(PaneState &pane, float width, float height) {
             // Column 2: Rozmiar
             ImGui::TableSetColumnIndex(2);
             std::string sizeStr = item.formattedSize();
-            if (!item.isParentEntry && item.isNavigableDirectory()) {
-              auto itSz = tab.directorySizes.find(item.path);
-              if (itSz != tab.directorySizes.end()) {
-                sizeStr = formatExactBytes(itSz->second);
+            int64_t entryBytes = -1;
+            if (!item.isParentEntry) {
+              if (item.isNavigableDirectory()) {
+                auto itSz = tab.directorySizes.find(item.path);
+                if (itSz != tab.directorySizes.end()) {
+                  entryBytes = itSz->second;
+                  sizeStr = formatExactBytes(entryBytes);
+                } else if (tab.diskUsageMode) {
+                  sizeStr = "...";
+                }
+              } else if (item.size.has_value()) {
+                entryBytes = *item.size;
               }
             }
+
+            float colW = ImGui::GetColumnWidth();
+            if (tab.diskUsageMode && !item.isParentEntry && entryBytes >= 0 &&
+                maxDiskBytes > 0 && totalDiskBytes > 0) {
+              double pct =
+                  (static_cast<double>(entryBytes) * 100.0) /
+                  static_cast<double>(totalDiskBytes);
+              float barFrac = static_cast<float>(
+                  static_cast<double>(entryBytes) /
+                  static_cast<double>(maxDiskBytes));
+              barFrac = std::clamp(barFrac, 0.0f, 1.0f);
+
+              ImVec2 cellPos = ImGui::GetCursorScreenPos();
+              ImU32 barCol = (pct >= 40.0)
+                                 ? IM_COL32(249, 38, 114, 95)
+                                 : (pct >= 15.0 ? IM_COL32(230, 219, 116, 85)
+                                                : IM_COL32(102, 217, 239, 75));
+              if (barFrac > 0.0f) {
+                ImGui::GetWindowDrawList()->AddRectFilled(
+                    ImVec2(cellPos.x, cellPos.y + 2.0f),
+                    ImVec2(cellPos.x + std::max(3.0f, (colW - 4.0f) * barFrac),
+                           cellPos.y + rowHeight - 2.0f),
+                    barCol, 2.0f);
+              }
+              char pctBuf[48];
+              std::snprintf(pctBuf, sizeof(pctBuf), "%s (%.1f%%)",
+                            formatByteCount(entryBytes).c_str(), pct);
+              sizeStr = pctBuf;
+            }
+
             ImVec4 szCol = dimIfInactive(
                 isMarked ? AntigravityColors::markedGold
-                         : (item.isNavigableDirectory()
+                         : (item.isNavigableDirectory() && !tab.diskUsageMode
                                 ? AntigravityColors::textMuted
                                 : AntigravityColors::textSecondary));
-            float colW = ImGui::GetColumnWidth();
             float textW = ImGui::CalcTextSize(sizeStr.c_str()).x;
             if (colW > textW + 6.0f) {
               ImGui::SetCursorPosX(ImGui::GetCursorPosX() + colW - textW -

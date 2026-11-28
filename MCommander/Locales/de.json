@@ -153,5 +153,6 @@
   "dialog.connect_remote.title": "Mit SFTP / SSH-Server verbinden (⌘K)",
   "dialog.connect_remote.prompt": "Remote-URI (sh://user@host/pfad oder sftp://user@host):",
   "dialog.connect_remote.hint": "Verwendet SSH-Schlüssel aus ~/.ssh und ~/.ssh/config.",
-  "dialog.connect_remote.btn": "Verbinden"
+  "dialog.connect_remote.btn": "Verbinden",
+  "menu.ncdu_mode": "Speicheranalyse (ncdu-Ansicht)"
 }
