@@ -18,3 +18,10 @@ Sugestie dalszego rozwoju na podstawie dotychczasowych prac nad **mcx** (`v1.0.0
 - [x] **Dokończyć tłumaczenie treści okien modalnych** — przenieść pozostałe komunikaty z `CommanderEngine.cpp` (toasty, błędy) oraz opisy wewnątrz okien (`MultiRename`, `SearchFiles`, `SyncDirs`, `Help`) do kluczy w `pl.json` / `en.json` / `de.json`.
 - [x] **Automatyczny skrypt budujący (`build.sh` / `Makefile`)** — jeden skrypt, który podbija `MCX_BUILD` po kropce, buduje wersję `Release`, aktualizuje `/Applications/mcx.app` i robi commit/push.
 - [x] **Wypchnąć zaległy commit `f51c7ea` + `TODO.md` na GitHuba**, gdy serwer GitHub przestanie zwracać błąd 500.
+
+## 4. Kolejny etap rozwoju
+- [ ] **Zdalne połączenia SFTP / SSH w panelu (`cd sh://user@host`)** — wirtualny system plików (analogiczny do `loadArchiveDirectory`) dla zdalnych hostów (MikroTik, Armbian, serwery w LAN) z użyciem kluczy z `~/.ssh` oraz kopiowaniem `F5` między Makiem a serwerem.
+- [ ] **Prawdziwy interaktywny terminal (`forkpty`) pod `Ctrl+O`** — żywa sesja `zsh` oparta na pseudoterminalu (`forkpty` z `<util.h>`) z dwukierunkową synchronizacją `cd` między panelami a powłoką.
+- [ ] **Kolorowanie składni w Listerze (`F3`), Edytorze (`F4`) i Quick View (`Ctrl+Q`)** — lekki tokenizer C++20 dla C/C++, Lua, JSON, Shell/RouterOS, Markdown i XML w palecie Monokai (`AntigravityTheme.cpp`).
+- [ ] **Analiza rozmiaru katalogów / Mapa dysku (`Ctrl+Space` / widok `ncdu`)** — procentowe paski zajętości w kolumnie rozmiaru bazujące na szybkim skanowaniu `fts_open`/`fts_read`.
+- [ ] **Kolejka transferów (Background Queue Manager)** — kolejkowanie kolejnych operacji kopiowania/przenoszenia (`F5` → `F2 W kolejkę`), aby wykonywały się sekwencyjnie jedna po drugiej zamiast równolegle obciążać dysk i sieć.
