@@ -74,6 +74,9 @@ FileItem makeParentEntry(const std::string& currentPath) {
 } // namespace
 
 std::string PaneTabState::title() const {
+    if (isRemote()) {
+        return remote->scheme + "://" + remote->targetSpec();
+    }
     if (isInsideArchive()) {
         return "[" + fs::path(archivePath).filename().string() + "]";
     }

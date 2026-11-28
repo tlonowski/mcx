@@ -148,5 +148,10 @@
   "dialog.transfer.in_background": "BACKGROUND",
   "dialog.create_file.title": "New File (Shift+F4)",
   "dialog.create_file.prompt": "New file name:",
-  "dialog.create_file.btn": "Create & Edit"
+  "dialog.create_file.btn": "Create & Edit",
+  "menu.connect_remote": "Connect to SFTP / SSH…",
+  "dialog.connect_remote.title": "Connect to SFTP / SSH Server (⌘K)",
+  "dialog.connect_remote.prompt": "Remote URI (sh://user@host/path or sftp://user@host):",
+  "dialog.connect_remote.hint": "Uses SSH keys from ~/.ssh and ~/.ssh/config.",
+  "dialog.connect_remote.btn": "Connect"
 }

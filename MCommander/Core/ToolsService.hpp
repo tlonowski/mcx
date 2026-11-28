@@ -97,6 +97,48 @@ public:
         bool recursive,
         std::string& errorOut
     );
+
+    // SFTP / SSH Virtual File System
+    static std::vector<FileItem> listRemoteDirectorySync(
+        const RemoteConnection& conn,
+        bool includeHidden,
+        std::string& errorOut
+    );
+
+    static bool downloadFromRemoteSync(
+        const RemoteConnection& conn,
+        const std::vector<std::string>& remotePaths,
+        const std::vector<bool>& isDirectoryFlags,
+        const std::string& localDestDir,
+        std::string& errorOut
+    );
+
+    static bool uploadToRemoteSync(
+        const RemoteConnection& conn,
+        const std::vector<std::string>& localPaths,
+        const std::string& remoteDestDir,
+        std::string& errorOut
+    );
+
+    static bool createRemoteDirectorySync(
+        const RemoteConnection& conn,
+        const std::string& dirName,
+        std::string& errorOut
+    );
+
+    static bool renameRemoteItemSync(
+        const RemoteConnection& conn,
+        const std::string& oldRemotePath,
+        const std::string& newName,
+        std::string& errorOut
+    );
+
+    static bool deleteRemoteItemsSync(
+        const RemoteConnection& conn,
+        const std::vector<std::string>& remotePaths,
+        const std::vector<bool>& isDirectoryFlags,
+        std::string& errorOut
+    );
 };
 
 } // namespace mc

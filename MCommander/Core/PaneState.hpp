@@ -25,6 +25,7 @@ struct PaneTabState {
     std::string currentPath;
     std::string archivePath;   // Non-empty when browsing inside an archive (VFS)
     std::string archiveSubdir; // Relative folder inside archive
+    std::optional<RemoteConnection> remote; // Non-empty when browsing SFTP/SSH (VFS)
     std::vector<FileItem> items;
     std::vector<FileItem> displayedItems;
     std::string filterText;
@@ -49,9 +50,10 @@ struct PaneTabState {
 
     std::string title() const;
     bool isInsideArchive() const { return !archivePath.empty(); }
+    bool isRemote() const { return remote.has_value() && remote->isValid(); }
     bool canGoBack() const { return !historyBack.empty(); }
     bool canGoForward() const { return !historyForward.empty(); }
-    bool canGoUp() const { return isInsideArchive() || currentPath != "/"; }
+    bool canGoUp() const { return isInsideArchive() || isRemote() || currentPath != "/"; }
 
     std::vector<FileItem> selectedItems() const;
     const FileItem* cursorItem() const;

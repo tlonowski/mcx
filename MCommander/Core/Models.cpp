@@ -128,4 +128,57 @@ std::optional<double> MountedVolume::usedFraction() const {
     return std::clamp(frac, 0.0, 1.0);
 }
 
+bool parseRemoteUri(const std::string& input, RemoteConnection& out) {
+    std::string s = input;
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+
+    std::string scheme;
+    size_t pos = 0;
+    if (s.rfind("sftp://", 0) == 0) { scheme = "sftp"; pos = 7; }
+    else if (s.rfind("ssh://", 0) == 0) { scheme = "sh"; pos = 6; }
+    else if (s.rfind("sh://", 0) == 0) { scheme = "sh"; pos = 5; }
+    else return false;
+
+    std::string rest = s.substr(pos);
+    if (rest.empty()) return false;
+
+    std::string authority = rest;
+    std::string path = "/";
+    auto slashPos = rest.find('/');
+    if (slashPos != std::string::npos) {
+        authority = rest.substr(0, slashPos);
+        path = rest.substr(slashPos);
+        if (path.empty()) path = "/";
+    }
+
+    std::string user;
+    std::string hostPort = authority;
+    auto atPos = authority.rfind('@');
+    if (atPos != std::string::npos) {
+        user = authority.substr(0, atPos);
+        hostPort = authority.substr(atPos + 1);
+    }
+
+    std::string host = hostPort;
+    int port = 22;
+    auto colonPos = hostPort.rfind(':');
+    if (colonPos != std::string::npos && colonPos + 1 < hostPort.size()) {
+        std::string portStr = hostPort.substr(colonPos + 1);
+        bool allDigits = std::all_of(portStr.begin(), portStr.end(), [](unsigned char c) { return std::isdigit(c); });
+        if (allDigits) {
+            port = std::stoi(portStr);
+            host = hostPort.substr(0, colonPos);
+        }
+    }
+
+    if (host.empty()) return false;
+    out.scheme = scheme;
+    out.user = user;
+    out.host = host;
+    out.port = (port > 0 && port <= 65535) ? port : 22;
+    out.remotePath = path;
+    return true;
+}
+
 } // namespace mc

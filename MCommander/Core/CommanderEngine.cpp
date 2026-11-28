@@ -238,7 +238,9 @@ void CommanderEngine::updateQuickViewIfNeeded() {
         }
         return;
     }
-    std::string targetKey = tab.isInsideArchive() ? (tab.archivePath + "::" + item->path) : item->path;
+    std::string targetKey = tab.isRemote()
+        ? (tab.remote->uri() + "::" + item->path)
+        : (tab.isInsideArchive() ? (tab.archivePath + "::" + item->path) : item->path);
     if (quickView.loadedPath == targetKey) return;
     quickView.loadedPath = targetKey;
 
@@ -249,6 +251,15 @@ void CommanderEngine::updateQuickViewIfNeeded() {
     quickView.isImage = false;
     quickView.imageWidth = 0;
     quickView.imageHeight = 0;
+
+    if (tab.isRemote()) {
+        quickView.isDirectory = item->isNavigableDirectory();
+        quickView.isBinary = false;
+        quickView.hexMode = false;
+        quickView.textContent = "(Zdalny plik SFTP — użyj F3 aby pobrać do podglądu lub F5 aby skopiować)";
+        quickView.hexContent.clear();
+        return;
+    }
 
     if (tab.isInsideArchive()) {
         quickView.isDirectory = item->isNavigableDirectory();
@@ -386,6 +397,14 @@ void CommanderEngine::refreshAllVisibleTabs() {
 void CommanderEngine::refreshPane(std::optional<PaneSide> side) {
     PaneSide targetSide = side.value_or(activeSide);
     auto& tab = pane(targetSide).activeTab();
+    if (tab.isRemote()) {
+        loadRemoteDirectory(targetSide, tab.id, *tab.remote);
+        return;
+    }
+    if (tab.isInsideArchive()) {
+        loadArchiveDirectory(targetSide, tab.id, tab.archivePath, tab.archiveSubdir);
+        return;
+    }
     loadDirectory(targetSide, tab.id, tab.currentPath, true);
 }
 
@@ -438,6 +457,12 @@ void CommanderEngine::loadDirectory(
 }
 
 void CommanderEngine::navigate(const std::string& path, std::optional<PaneSide> side, bool recordHistory) {
+    RemoteConnection remoteConn;
+    if (parseRemoteUri(path, remoteConn)) {
+        connectRemote(path, side);
+        return;
+    }
+
     PaneSide targetSide = side.value_or(activeSide);
     auto& tab = pane(targetSide).activeTab();
     std::string normalized = normalizeDirPath(path);
@@ -453,6 +478,9 @@ void CommanderEngine::navigate(const std::string& path, std::optional<PaneSide> 
         tab.historyForward.clear();
     }
 
+    tab.remote.reset();
+    tab.archivePath.clear();
+    tab.archiveSubdir.clear();
     tab.currentPath = normalized;
     tab.filterText.clear();
     activeSide = targetSide;
@@ -464,6 +492,24 @@ void CommanderEngine::goUp(std::optional<PaneSide> side) {
     PaneSide targetSide = side.value_or(activeSide);
     auto& tab = pane(targetSide).activeTab();
     if (!tab.canGoUp()) return;
+
+    if (tab.isRemote()) {
+        activeSide = targetSide;
+        std::string curRemote = tab.remote->remotePath;
+        if (curRemote.empty() || curRemote == "/") {
+            tab.remote.reset();
+            tab.filterText.clear();
+            loadDirectory(targetSide, tab.id, tab.currentPath, false);
+        } else {
+            RemoteConnection nextConn = *tab.remote;
+            std::string parentRemote = fs::path(curRemote).parent_path().string();
+            if (parentRemote.empty()) parentRemote = "/";
+            nextConn.remotePath = parentRemote;
+            tab.filterText.clear();
+            loadRemoteDirectory(targetSide, tab.id, nextConn, curRemote);
+        }
+        return;
+    }
 
     if (tab.isInsideArchive()) {
         activeSide = targetSide;
@@ -559,11 +605,82 @@ void CommanderEngine::loadArchiveDirectory(PaneSide side, uint64_t tabID, const 
     });
 }
 
+void CommanderEngine::loadRemoteDirectory(PaneSide side, uint64_t tabID, const RemoteConnection& conn, std::string selectAfterPath) {
+    for (auto& t : pane(side).tabs) {
+        if (t.id == tabID) {
+            t.isLoading = true;
+            t.errorMessage.clear();
+            break;
+        }
+    }
+    bool hidden = showHiddenFiles;
+    spawnWorker([this, side, tabID, conn, hidden, selectAfterPath = std::move(selectAfterPath)]() {
+        std::string err;
+        auto items = ToolsService::listRemoteDirectorySync(conn, hidden, err);
+        postMain([this, side, tabID, conn, items = std::move(items), err = std::move(err), selectAfterPath]() mutable {
+            for (auto& t : pane(side).tabs) {
+                if (t.id == tabID) {
+                    t.isLoading = false;
+                    if (!err.empty()) {
+                        t.errorMessage = err;
+                        errorAlertMessage = err;
+                    } else {
+                        t.archivePath.clear();
+                        t.archiveSubdir.clear();
+                        t.remote = conn;
+                        t.items = std::move(items);
+                        t.selectedPaths.clear();
+                        t.availableSpaceBytes.reset();
+                        t.recomputeDisplayedItems();
+                        t.cursorPath = t.displayedItems.empty() ? "" : t.displayedItems.front().path;
+                        if (!selectAfterPath.empty()) {
+                            for (const auto& it : t.displayedItems) {
+                                if (it.path == selectAfterPath) {
+                                    t.setCursorOnly(selectAfterPath);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        });
+    });
+}
+
+void CommanderEngine::connectRemote(const std::string& uri, std::optional<PaneSide> side) {
+    RemoteConnection conn;
+    if (!parseRemoteUri(uri, conn)) {
+        showToast("Nieprawidłowy adres (użyj np. sh://user@host/ lub sftp://user@host/)");
+        return;
+    }
+    dialog.kind = DialogKind::None;
+    PaneSide targetSide = side.value_or(activeSide);
+    activeSide = targetSide;
+    auto& tab = pane(targetSide).activeTab();
+    tab.filterText.clear();
+    showToast("Łączenie z " + conn.targetSpec() + "…");
+    loadRemoteDirectory(targetSide, tab.id, conn);
+}
+
 void CommanderEngine::openItem(const FileItem& item, std::optional<PaneSide> side) {
     PaneSide targetSide = side.value_or(activeSide);
     auto& tab = pane(targetSide).activeTab();
     if (item.isParentEntry) {
         goUp(targetSide);
+        return;
+    }
+    if (tab.isRemote()) {
+        if (item.isNavigableDirectory()) {
+            RemoteConnection nextConn = *tab.remote;
+            nextConn.remotePath = item.path;
+            activeSide = targetSide;
+            tab.filterText.clear();
+            loadRemoteDirectory(targetSide, tab.id, nextConn);
+        } else {
+            showToast("Użyj F3 (podgląd) lub F5 (pobierz plik)");
+        }
         return;
     }
     if (tab.isInsideArchive()) {
@@ -733,6 +850,27 @@ void CommanderEngine::triggerF3View() {
         return;
     }
 
+    if (tab.isRemote() && !item->isNavigableDirectory()) {
+        RemoteConnection conn = *tab.remote;
+        FileItem remoteItem = *item;
+        showToast("Pobieranie do podglądu: " + remoteItem.name + "…");
+        spawnWorker([this, conn, remoteItem]() {
+            std::string tmpDir = "/tmp";
+            std::string err;
+            bool ok = ToolsService::downloadFromRemoteSync(conn, {remoteItem.path}, {false}, tmpDir, err);
+            postMain([this, ok, err = std::move(err), remoteItem, tmpPath = "/tmp/" + remoteItem.name]() {
+                if (!ok) {
+                    errorAlertMessage = err;
+                    return;
+                }
+                FileItem localView = remoteItem;
+                localView.path = tmpPath;
+                openViewer(localView);
+            });
+        });
+        return;
+    }
+
     openViewer(*item);
 }
 
@@ -759,6 +897,7 @@ void CommanderEngine::triggerF4Edit() {
 
 void CommanderEngine::triggerF5Copy() {
     auto& tab = activePane().activeTab();
+    auto& oppTab = inactivePane().activeTab();
     auto items = tab.selectedItems();
     if (items.empty()) {
         showToast("Brak wybranych plików do skopiowania");
@@ -767,18 +906,28 @@ void CommanderEngine::triggerF5Copy() {
     dialog = DialogState{};
     dialog.kind = DialogKind::TransferConfirm;
     dialog.targetItems = std::move(items);
-    dialog.destinationPath = inactivePane().activeTab().currentPath;
+    dialog.destinationPath = oppTab.isRemote() ? oppTab.remote->uri() : oppTab.currentPath;
     dialog.isMove = false;
     dialog.conflictPolicy = ConflictResolutionPolicy::Ask;
     dialog.transferInBackground = false;
     if (tab.isInsideArchive()) {
         dialog.fromArchivePath = tab.archivePath;
     }
+    if (tab.isRemote()) {
+        dialog.fromRemote = tab.remote;
+    }
+    if (oppTab.isRemote()) {
+        dialog.toRemote = oppTab.remote;
+    }
 }
 
 void CommanderEngine::triggerF6Move() {
     if (activePane().activeTab().isInsideArchive()) {
         showToast("Przenoszenie bezpośrednio z archiwum nie jest obsługiwane — użyj F5");
+        return;
+    }
+    if (activePane().activeTab().isRemote() || inactivePane().activeTab().isRemote()) {
+        showToast("Dla SFTP użyj F5 (Kopiuj) oraz F8 (Usuń)");
         return;
     }
     auto items = activePane().activeTab().selectedItems();
@@ -865,7 +1014,16 @@ void CommanderEngine::triggerGoToPath() {
     dialog = DialogState{};
     dialog.kind = DialogKind::GoToPath;
     dialog.side = activeSide;
-    dialog.inputBuffer = activePane().activeTab().currentPath;
+    auto& tab = activePane().activeTab();
+    dialog.inputBuffer = tab.isRemote() ? tab.remote->uri() : tab.currentPath;
+}
+
+void CommanderEngine::triggerConnectRemote() {
+    dialog = DialogState{};
+    dialog.kind = DialogKind::ConnectRemote;
+    dialog.side = activeSide;
+    auto& tab = activePane().activeTab();
+    dialog.inputBuffer = tab.isRemote() ? tab.remote->uri() : "sh://admin@192.168.88.1/";
 }
 
 void CommanderEngine::triggerSelectByPattern(bool isSelecting) {
@@ -1098,6 +1256,25 @@ void CommanderEngine::triggerDiffFiles() {
 // MARK: - File Operations
 
 void CommanderEngine::createFolder(const std::string& name, const std::string& parentPath, PaneSide side) {
+    auto& tab = pane(side).activeTab();
+    if (tab.isRemote()) {
+        RemoteConnection conn = *tab.remote;
+        dialog.kind = DialogKind::None;
+        spawnWorker([this, conn, name, side, tabID = tab.id]() {
+            std::string err;
+            bool ok = ToolsService::createRemoteDirectorySync(conn, name, err);
+            postMain([this, ok, err = std::move(err), name, side, tabID, conn]() {
+                if (ok) {
+                    showToast("Utworzono zdalny katalog: " + name);
+                    loadRemoteDirectory(side, tabID, conn);
+                } else {
+                    errorAlertMessage = err;
+                }
+            });
+        });
+        return;
+    }
+
     std::string createdPath, err;
     if (FileSystemService::createDirectorySync(name, parentPath, createdPath, err)) {
         dialog.kind = DialogKind::None;
@@ -1110,6 +1287,25 @@ void CommanderEngine::createFolder(const std::string& name, const std::string& p
 }
 
 void CommanderEngine::renameItem(const FileItem& item, const std::string& newName, PaneSide side) {
+    auto& tab = pane(side).activeTab();
+    if (tab.isRemote()) {
+        RemoteConnection conn = *tab.remote;
+        dialog.kind = DialogKind::None;
+        spawnWorker([this, conn, oldPath = item.path, newName, side, tabID = tab.id]() {
+            std::string err;
+            bool ok = ToolsService::renameRemoteItemSync(conn, oldPath, newName, err);
+            postMain([this, ok, err = std::move(err), newName, side, tabID, conn]() {
+                if (ok) {
+                    showToast("Zmieniono nazwę na: " + newName);
+                    loadRemoteDirectory(side, tabID, conn);
+                } else {
+                    errorAlertMessage = err;
+                }
+            });
+        });
+        return;
+    }
+
     std::string destPath, err;
     if (FileSystemService::renameItemSync(item.path, newName, destPath, err)) {
         dialog.kind = DialogKind::None;
@@ -1155,6 +1351,33 @@ void CommanderEngine::runQuickCommandInActiveDir(const std::string& cmd, const s
 }
 
 void CommanderEngine::deleteItems(const std::vector<FileItem>& items, bool permanently, PaneSide side) {
+    auto& tab = pane(side).activeTab();
+    if (tab.isRemote()) {
+        std::vector<std::string> remotePaths;
+        std::vector<bool> dirFlags;
+        for (const auto& it : items) {
+            if (!it.isParentEntry) {
+                remotePaths.push_back(it.path);
+                dirFlags.push_back(it.isNavigableDirectory());
+            }
+        }
+        RemoteConnection conn = *tab.remote;
+        dialog.kind = DialogKind::None;
+        spawnWorker([this, conn, remotePaths = std::move(remotePaths), dirFlags = std::move(dirFlags), side, tabID = tab.id]() {
+            std::string err;
+            bool ok = ToolsService::deleteRemoteItemsSync(conn, remotePaths, dirFlags, err);
+            postMain([this, ok, err = std::move(err), count = remotePaths.size(), side, tabID, conn]() {
+                if (ok) {
+                    showToast("Usunięto ze zdalnego serwera: " + std::to_string(count) + " el.");
+                    loadRemoteDirectory(side, tabID, conn);
+                } else {
+                    errorAlertMessage = err;
+                }
+            });
+        });
+        return;
+    }
+
     std::vector<std::string> paths;
     paths.reserve(items.size());
     for (const auto& it : items) {
@@ -1265,6 +1488,52 @@ void CommanderEngine::startArchiveExtract(const std::string& archivePath, const 
                 refreshAllVisibleTabs();
             } else {
                 errorAlertMessage = err.empty() ? "Błąd podczas rozpakowywania z archiwum" : err;
+            }
+        });
+    });
+}
+
+void CommanderEngine::startRemoteTransfer(
+    const std::optional<RemoteConnection>& fromRemote,
+    const std::optional<RemoteConnection>& toRemote,
+    const std::vector<FileItem>& items,
+    const std::string& localDestDir,
+    bool inBackground
+) {
+    dialog.kind = DialogKind::None;
+    if (fromRemote.has_value() && toRemote.has_value()) {
+        showToast("Bezpośrednie kopiowanie SFTP -> SFTP nie jest jeszcze obsługiwane — pobierz lokalnie na Maca");
+        return;
+    }
+    if (items.empty()) return;
+
+    bool isDownload = fromRemote.has_value();
+    std::string title = isDownload ? "Pobieranie SFTP…" : "Wysyłanie SFTP…";
+    operationProgress = FileOperationProgress{title, items.front().name, 0, static_cast<int>(items.size()), 0, 0, inBackground};
+
+    std::vector<std::string> paths;
+    std::vector<bool> dirFlags;
+    for (const auto& it : items) {
+        if (!it.isParentEntry) {
+            paths.push_back(it.path);
+            dirFlags.push_back(it.isNavigableDirectory());
+        }
+    }
+
+    spawnWorker([this, isDownload, fromRemote, toRemote, paths = std::move(paths), dirFlags = std::move(dirFlags), localDestDir]() {
+        std::string err;
+        bool ok = isDownload
+            ? ToolsService::downloadFromRemoteSync(*fromRemote, paths, dirFlags, localDestDir, err)
+            : ToolsService::uploadToRemoteSync(*toRemote, paths, toRemote->remotePath, err);
+
+        postMain([this, ok, err = std::move(err), isDownload, count = paths.size()]() {
+            operationProgress.reset();
+            if (ok) {
+                showToast((isDownload ? "Pobrano SFTP: " : "Wysłano SFTP: ") + std::to_string(count) + " el.");
+                activePane().activeTab().deselectAll();
+                refreshAllVisibleTabs();
+            } else {
+                errorAlertMessage = err;
             }
         });
     });
@@ -1604,6 +1873,9 @@ void CommanderEngine::runCommandInput() {
         while (!arg.empty() && std::isspace(static_cast<unsigned char>(arg.front()))) arg.erase(arg.begin());
         if (arg == "~") arg = platform::homeDirectory();
         else if (arg.rfind("~/", 0) == 0) arg = platform::homeDirectory() + arg.substr(1);
+        else if (arg.rfind("sh://", 0) == 0 || arg.rfind("ssh://", 0) == 0 || arg.rfind("sftp://", 0) == 0) {
+            // Keep remote URI untouched
+        }
         else if (!arg.empty() && arg.front() != '/') {
             arg = (fs::path(activePane().activeTab().currentPath) / arg).string();
         }

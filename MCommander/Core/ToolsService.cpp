@@ -1080,4 +1080,267 @@ bool ToolsService::changePermissionsSync(
     return true;
 }
 
+namespace {
+
+std::string sftpQuote(const std::string& p) {
+    std::string out = "\"";
+    for (char c : p) {
+        if (c == '"' || c == '\\') out.push_back('\\');
+        out.push_back(c);
+    }
+    out.push_back('"');
+    return out;
+}
+
+std::string joinRemotePath(const std::string& dir, const std::string& name) {
+    if (dir.empty() || dir == "/") return "/" + name;
+    if (dir.back() == '/') return dir + name;
+    return dir + "/" + name;
+}
+
+bool runSftpBatchSync(
+    const RemoteConnection& conn,
+    const std::string& batchContent,
+    std::string& outputOut,
+    std::string& errorOut
+) {
+    char tmpl[] = "/tmp/mcx-sftp-XXXXXX";
+    int fd = mkstemp(tmpl);
+    if (fd < 0) {
+        errorOut = "Nie udało się utworzyć pliku tymczasowego sftp.";
+        return false;
+    }
+    std::string batchPath(tmpl);
+    {
+        FILE* f = fdopen(fd, "w");
+        if (!f) {
+            close(fd);
+            std::error_code ec;
+            fs::remove(batchPath, ec);
+            errorOut = "Nie udało się zapisać skryptu sftp.";
+            return false;
+        }
+        fwrite(batchContent.data(), 1, batchContent.size(), f);
+        fclose(f);
+    }
+
+    std::string cmd = "/usr/bin/sftp -b " + shellQuote(batchPath) +
+                      " -P " + std::to_string(conn.port) +
+                      " -o BatchMode=yes" +
+                      " -o ConnectTimeout=8" +
+                      " -o StrictHostKeyChecking=accept-new" +
+                      " -o ControlMaster=auto" +
+                      " -o ControlPath=/tmp/mcx-ssh-%C" +
+                      " -o ControlPersist=120" +
+                      " " + shellQuote(conn.targetSpec());
+
+    auto res = ToolsService::runShellCommandSync(cmd, "/tmp");
+    std::error_code ec;
+    fs::remove(batchPath, ec);
+
+    outputOut = res.output;
+    if (res.exitCode != 0) {
+        errorOut = res.output.empty()
+            ? ("Błąd połączenia SFTP z " + conn.targetSpec() + " (kod " + std::to_string(res.exitCode) + ")")
+            : res.output;
+        return false;
+    }
+    return true;
+}
+
+std::optional<std::time_t> parseLsDate(const std::string& mon, const std::string& dayStr, const std::string& timeOrYear) {
+    static const char* months[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+    int mIdx = -1;
+    for (int i = 0; i < 12; ++i) {
+        if (mon == months[i]) { mIdx = i; break; }
+    }
+    if (mIdx < 0) return std::nullopt;
+
+    std::time_t now = std::time(nullptr);
+    std::tm tmNow{};
+    localtime_r(&now, &tmNow);
+
+    std::tm tmVal{};
+    tmVal.tm_mon = mIdx;
+    tmVal.tm_mday = std::atoi(dayStr.c_str());
+    tmVal.tm_isdst = -1;
+
+    auto colon = timeOrYear.find(':');
+    if (colon != std::string::npos) {
+        tmVal.tm_year = tmNow.tm_year;
+        tmVal.tm_hour = std::atoi(timeOrYear.substr(0, colon).c_str());
+        tmVal.tm_min = std::atoi(timeOrYear.substr(colon + 1).c_str());
+    } else {
+        int yr = std::atoi(timeOrYear.c_str());
+        tmVal.tm_year = (yr > 1900) ? (yr - 1900) : tmNow.tm_year;
+    }
+    return std::mktime(&tmVal);
+}
+
+} // namespace
+
+std::vector<FileItem> ToolsService::listRemoteDirectorySync(
+    const RemoteConnection& conn,
+    bool includeHidden,
+    std::string& errorOut
+) {
+    std::vector<FileItem> items;
+    std::string remoteDir = conn.remotePath.empty() ? "/" : conn.remotePath;
+    std::string batch = "ls -la " + sftpQuote(remoteDir) + "\n";
+
+    std::string out;
+    if (!runSftpBatchSync(conn, batch, out, errorOut)) {
+        return items;
+    }
+
+    FileItem up;
+    up.path = "__MC_PARENT_ENTRY__";
+    up.name = "..";
+    up.displayStem = "..";
+    up.posixPermissions = "drwxr-xr-x";
+    up.typeDescription = (remoteDir == "/") ? "Rozłącz SFTP" : "Katalog nadrzędny";
+    up.isParentEntry = true;
+    up.isDirectory = true;
+    items.push_back(std::move(up));
+
+    std::istringstream iss(out);
+    std::string line;
+    while (std::getline(iss, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        if (line.rfind("sftp>", 0) == 0 || line.rfind("total ", 0) == 0) continue;
+
+        char first = line[0];
+        if (first != '-' && first != 'd' && first != 'l' && first != 'b' && first != 'c' && first != 'p' && first != 's') {
+            continue;
+        }
+        if (line.size() < 10) continue;
+
+        std::vector<std::string> tokens;
+        size_t i = 0;
+        while (i < line.size() && tokens.size() < 8) {
+            while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) ++i;
+            if (i >= line.size()) break;
+            size_t start = i;
+            while (i < line.size() && !std::isspace(static_cast<unsigned char>(line[i]))) ++i;
+            tokens.push_back(line.substr(start, i - start));
+        }
+        if (tokens.size() < 8) continue;
+        while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) ++i;
+        if (i >= line.size()) continue;
+
+        std::string name = line.substr(i);
+        bool isSym = (first == 'l');
+        if (isSym) {
+            auto arrow = name.find(" -> ");
+            if (arrow != std::string::npos) name = name.substr(0, arrow);
+        }
+        if (name == "." || name == ".." || name.empty()) continue;
+        if (!includeHidden && name.front() == '.') continue;
+
+        bool isDir = (first == 'd');
+        int64_t sz = 0;
+        try { sz = std::stoll(tokens[4]); } catch (...) { sz = 0; }
+
+        FileItem item;
+        item.name = name;
+        item.path = joinRemotePath(remoteDir, name);
+        item.isDirectory = isDir;
+        item.posixPermissions = tokens[0];
+        item.modificationTime = parseLsDate(tokens[5], tokens[6], tokens[7]);
+
+        if (isDir) {
+            item.displayStem = name;
+            item.typeDescription = "Folder (SFTP)";
+        } else {
+            item.size = sz;
+            auto dot = name.rfind('.');
+            if (dot != std::string::npos && dot > 0 && dot + 1 < name.size()) {
+                item.displayStem = name.substr(0, dot);
+                item.fileExtension = name.substr(dot + 1);
+            } else {
+                item.displayStem = name;
+            }
+            item.typeDescription = item.fileExtension.empty() ? "Plik (SFTP)" : (toLowerASCII(item.fileExtension) + " (SFTP)");
+        }
+        items.push_back(std::move(item));
+    }
+    return items;
+}
+
+bool ToolsService::downloadFromRemoteSync(
+    const RemoteConnection& conn,
+    const std::vector<std::string>& remotePaths,
+    const std::vector<bool>& isDirectoryFlags,
+    const std::string& localDestDir,
+    std::string& errorOut
+) {
+    if (remotePaths.empty()) return true;
+    std::string batch = "lcd " + sftpQuote(localDestDir) + "\n";
+    for (size_t i = 0; i < remotePaths.size(); ++i) {
+        bool isDir = (i < isDirectoryFlags.size()) ? isDirectoryFlags[i] : false;
+        batch += std::string(isDir ? "get -r " : "get ") + sftpQuote(remotePaths[i]) + "\n";
+    }
+    std::string out;
+    return runSftpBatchSync(conn, batch, out, errorOut);
+}
+
+bool ToolsService::uploadToRemoteSync(
+    const RemoteConnection& conn,
+    const std::vector<std::string>& localPaths,
+    const std::string& remoteDestDir,
+    std::string& errorOut
+) {
+    if (localPaths.empty()) return true;
+    std::string dest = remoteDestDir.empty() ? "/" : remoteDestDir;
+    std::string batch = "cd " + sftpQuote(dest) + "\n";
+    std::error_code ec;
+    for (const auto& lp : localPaths) {
+        bool isDir = fs::is_directory(lp, ec);
+        batch += std::string(isDir ? "put -r " : "put ") + sftpQuote(lp) + "\n";
+    }
+    std::string out;
+    return runSftpBatchSync(conn, batch, out, errorOut);
+}
+
+bool ToolsService::createRemoteDirectorySync(
+    const RemoteConnection& conn,
+    const std::string& dirName,
+    std::string& errorOut
+) {
+    std::string fullPath = joinRemotePath(conn.remotePath, dirName);
+    std::string batch = "mkdir " + sftpQuote(fullPath) + "\n";
+    std::string out;
+    return runSftpBatchSync(conn, batch, out, errorOut);
+}
+
+bool ToolsService::renameRemoteItemSync(
+    const RemoteConnection& conn,
+    const std::string& oldRemotePath,
+    const std::string& newName,
+    std::string& errorOut
+) {
+    std::string parent = fs::path(oldRemotePath).parent_path().string();
+    std::string newPath = joinRemotePath(parent.empty() ? "/" : parent, newName);
+    std::string batch = "rename " + sftpQuote(oldRemotePath) + " " + sftpQuote(newPath) + "\n";
+    std::string out;
+    return runSftpBatchSync(conn, batch, out, errorOut);
+}
+
+bool ToolsService::deleteRemoteItemsSync(
+    const RemoteConnection& conn,
+    const std::vector<std::string>& remotePaths,
+    const std::vector<bool>& isDirectoryFlags,
+    std::string& errorOut
+) {
+    if (remotePaths.empty()) return true;
+    std::string batch;
+    for (size_t i = 0; i < remotePaths.size(); ++i) {
+        bool isDir = (i < isDirectoryFlags.size()) ? isDirectoryFlags[i] : false;
+        batch += std::string(isDir ? "rmdir " : "rm ") + sftpQuote(remotePaths[i]) + "\n";
+    }
+    std::string out;
+    return runSftpBatchSync(conn, batch, out, errorOut);
+}
+
 } // namespace mc

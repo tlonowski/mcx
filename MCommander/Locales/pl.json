@@ -148,5 +148,10 @@
   "dialog.transfer.in_background": "W TLE",
   "dialog.create_file.title": "Nowy plik (Shift+F4)",
   "dialog.create_file.prompt": "Nazwa nowego pliku:",
-  "dialog.create_file.btn": "Utwórz i edytuj"
+  "dialog.create_file.btn": "Utwórz i edytuj",
+  "menu.connect_remote": "Połącz z SFTP / SSH…",
+  "dialog.connect_remote.title": "Połącz z serwerem SFTP / SSH (⌘K)",
+  "dialog.connect_remote.prompt": "Adres URI (sh://user@host/ścieżka lub sftp://user@host):",
+  "dialog.connect_remote.hint": "Używa kluczy SSH z ~/.ssh oraz konfiguracji ~/.ssh/config.",
+  "dialog.connect_remote.btn": "Połącz"
 }

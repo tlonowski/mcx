@@ -129,6 +129,26 @@ struct UserMenuItem {
     bool runInSubshell = false;
 };
 
+struct RemoteConnection {
+    std::string scheme = "sftp"; // "sftp" or "sh"
+    std::string user;
+    std::string host;
+    int port = 22;
+    std::string remotePath = "/";
+
+    bool isValid() const { return !host.empty(); }
+    std::string targetSpec() const { return user.empty() ? host : (user + "@" + host); }
+    std::string uri() const {
+        std::string out = scheme + "://" + targetSpec();
+        if (port != 22 && port > 0) out += ":" + std::to_string(port);
+        if (remotePath.empty() || remotePath.front() != '/') out += "/";
+        out += remotePath;
+        return out;
+    }
+};
+
+bool parseRemoteUri(const std::string& input, RemoteConnection& out);
+
 struct SearchResultItem {
     std::string path;
     std::string name;

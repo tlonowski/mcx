@@ -39,7 +39,8 @@ enum class DialogKind {
     UserMenu,
     CreateLink,
     DiffViewer,
-    CreateFile
+    CreateFile,
+    ConnectRemote
 };
 
 struct QuickViewState {
@@ -71,6 +72,8 @@ struct DialogState {
     bool isMove = false;
     bool transferInBackground = false;
     std::string fromArchivePath;
+    std::optional<RemoteConnection> fromRemote;
+    std::optional<RemoteConnection> toRemote;
     bool isSelectingPattern = true;
     ConflictResolutionPolicy conflictPolicy = ConflictResolutionPolicy::Ask;
 
@@ -198,6 +201,8 @@ public:
     void refreshPane(std::optional<PaneSide> side = std::nullopt);
     void loadDirectory(PaneSide side, uint64_t tabID, const std::string& path, bool preserveSelection = true, std::string selectAfterPath = "");
     void loadArchiveDirectory(PaneSide side, uint64_t tabID, const std::string& archivePath, const std::string& archiveSubdir, const std::string& password = "");
+    void loadRemoteDirectory(PaneSide side, uint64_t tabID, const RemoteConnection& conn, std::string selectAfterPath = "");
+    void connectRemote(const std::string& uri, std::optional<PaneSide> side = std::nullopt);
 
     void navigate(const std::string& path, std::optional<PaneSide> side = std::nullopt, bool recordHistory = true);
     void goUp(std::optional<PaneSide> side = std::nullopt);
@@ -229,6 +234,7 @@ public:
     void triggerF7NewFolder();
     void triggerF8Delete();
     void triggerGoToPath();
+    void triggerConnectRemote();
     void triggerSelectByPattern(bool isSelecting);
     void triggerMultiRename();
     void triggerFindFiles();
@@ -253,6 +259,7 @@ public:
 
     void startTransfer(const std::vector<std::string>& sourcePaths, const std::string& destDir, bool isMove, ConflictResolutionPolicy policy, bool inBackground = false);
     void startArchiveExtract(const std::string& archivePath, const std::vector<std::string>& internalPaths, const std::string& destDir, bool inBackground = false);
+    void startRemoteTransfer(const std::optional<RemoteConnection>& fromRemote, const std::optional<RemoteConnection>& toRemote, const std::vector<FileItem>& items, const std::string& localDestDir, bool inBackground = false);
     void handleDroppedFiles(const std::vector<std::string>& paths, PaneSide targetSide, bool isMove);
     void moveTransferToBackground();
     void resolveConflict(ConflictResolutionPolicy policy);

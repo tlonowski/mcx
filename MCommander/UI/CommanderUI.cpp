@@ -431,6 +431,10 @@ void CommanderUI::handleGlobalShortcuts() {
     engine_.triggerGoToPath();
     return;
   }
+  if (cmd && ImGui::IsKeyPressed(ImGuiKey_K)) {
+    engine_.triggerConnectRemote();
+    return;
+  }
   if (cmd && ImGui::IsKeyPressed(ImGuiKey_Y)) {
     engine_.triggerQuickLook();
     return;
@@ -778,6 +782,8 @@ void CommanderUI::renderTopToolbar() {
       hotlistSide_ = engine_.activeSide;
       engine_.requestHotlistPopup = true;
     }
+    if (ImGui::MenuItem(tr("menu.connect_remote"), "⌘K"))
+      engine_.triggerConnectRemote();
     if (ImGui::MenuItem(tr("menu.swap_panes"), "Ctrl+U"))
       engine_.swapPanes();
     if (ImGui::MenuItem(tr("menu.sync_panes"), "⌥⌘="))
@@ -1062,10 +1068,13 @@ void CommanderUI::renderFilePane(PaneState &pane, float width, float height) {
     float pathBtnW = std::max(60.0f, width - filterW - 18.0f);
 
     std::string maskDisplay =
-        tab.isInsideArchive()
-            ? (tab.archivePath +
-               (tab.archiveSubdir.empty() ? "" : ("/" + tab.archiveSubdir)))
-            : tab.currentPath;
+        tab.isRemote()
+            ? tab.remote->uri()
+            : (tab.isInsideArchive()
+                   ? (tab.archivePath +
+                      (tab.archiveSubdir.empty() ? ""
+                                                 : ("/" + tab.archiveSubdir)))
+                   : tab.currentPath);
     if (!maskDisplay.empty() && maskDisplay.back() != '/')
       maskDisplay += "/";
     maskDisplay +=
@@ -2055,7 +2064,10 @@ void CommanderUI::renderDialogs() {
       ImGui::Spacing();
 
       auto runTransfer = [&](bool bg) {
-        if (fromArchive) {
+        if (d.fromRemote.has_value() || d.toRemote.has_value()) {
+          engine_.startRemoteTransfer(d.fromRemote, d.toRemote, d.targetItems,
+                                      d.destinationPath, bg);
+        } else if (fromArchive) {
           std::vector<std::string> internalPaths;
           for (const auto &it : d.targetItems)
             internalPaths.push_back(it.path);
@@ -2954,6 +2966,32 @@ void CommanderUI::renderDialogs() {
       ImGui::Spacing();
       if (enter || boxButton(tr("dialog.create_file.btn"), true)) {
         engine_.createEmptyFileAndEdit(d.inputBuffer, d.parentPath, d.side);
+      }
+      ImGui::SameLine();
+      if (boxButton(tr("common.cancel")))
+        d.kind = DialogKind::None;
+      ImGui::EndPopup();
+    }
+    break;
+  }
+  case DialogKind::ConnectRemote: {
+    centerNext(520, 0);
+    ImGui::OpenPopup(tr("dialog.connect_remote.title"));
+    if (ImGui::BeginPopupModal(tr("dialog.connect_remote.title"), nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+      ImGui::Text("%s", tr("dialog.connect_remote.prompt"));
+      if (fonts_.mono)
+        ImGui::PushFont(fonts_.mono);
+      ImGui::SetNextItemWidth(490);
+      bool enter = ImGui::InputText("##RemoteUriInput", &d.inputBuffer,
+                                    ImGuiInputTextFlags_EnterReturnsTrue);
+      if (fonts_.mono)
+        ImGui::PopFont();
+      ImGui::TextColored(AntigravityColors::textMuted, "%s",
+                         tr("dialog.connect_remote.hint"));
+      ImGui::Spacing();
+      if (enter || boxButton(tr("dialog.connect_remote.btn"), true)) {
+        engine_.connectRemote(d.inputBuffer, d.side);
       }
       ImGui::SameLine();
       if (boxButton(tr("common.cancel")))
